@@ -1,6 +1,6 @@
 package bee.brainlatency.iomodel;
 
-class SyncBlockingBarista {
+class BlockingBarista {
 
     Coffee makeCoffee() {
         return Coffee.brew();

@@ -1,13 +1,13 @@
 package bee.brainlatency.iomodel;
 
-class Customer {
+class SyncCustomer {
     private Coffee coffee;
 
-    void takeCoffee(SyncBlockingBarista barista) {
+    void takeCoffee(BlockingBarista barista) {
         this.coffee = barista.makeCoffee(); // Blocked until coffe is ready.
     }
 
-    void takeCoffee(SyncNonBlockingBarista barista) {
+    void takeCoffee(NonBlockingBarista barista) {
         barista.makeCoffee();
         while (!barista.isReady()) { // Polling
             try {

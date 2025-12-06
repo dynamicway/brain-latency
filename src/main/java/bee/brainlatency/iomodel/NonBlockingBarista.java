@@ -1,6 +1,6 @@
 package bee.brainlatency.iomodel;
 
-class SyncNonBlockingBarista {
+class NonBlockingBarista {
     private Coffee coffee;
     private boolean ready = false;
 
