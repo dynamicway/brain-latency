@@ -1,8 +1,11 @@
 package bee.brainlatency.reactive.reactor.file
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.types.shouldBeInstanceOf
+import java.nio.file.NoSuchFileException
 import java.util.concurrent.atomic.AtomicLong
 
 class FileServiceTest : StringSpec({
@@ -49,6 +52,29 @@ class FileServiceTest : StringSpec({
 
         // only 200 out of 300 requests should succeed
         count.get() shouldBe 200  // 200 succeeded, 100 rejected
+    }
+
+    "write" {
+        val sut = FileService()
+
+        sut.write("test-write.txt", "test content").block()
+
+        // verify written content
+        val content = sut.read("test-write.txt").block()
+        content shouldBe "test content"
+    }
+
+    "delete" {
+        val sut = FileService()
+        // create file first
+        sut.write("test-delete.txt", "temp").block()
+
+        sut.delete("test-delete.txt").block()
+        // verify file is actually deleted
+        val exception = shouldThrow<RuntimeException> {
+            sut.read("test-delete.txt").block()
+        }
+        exception.cause.shouldBeInstanceOf<NoSuchFileException>()
     }
 
 })

@@ -16,16 +16,21 @@ class FileService {
     private fun readFile(name: String): String {
         run {
             Thread.sleep(2000)
-            return Files.readString(Path.of("""./${name}"""))
+            return Files.readString(Path.of(name))
         }
     }
 
     fun write(name: String, content: String): Mono<Unit> {
-        TODO()
+        return Mono.fromRunnable<Unit>
+        { Files.write(Path.of(name), content.toByteArray()) }
+            .subscribeOn(scheduler)
     }
 
     fun delete(name: String): Mono<Unit> {
-        TODO()
+        return Mono.fromRunnable<Unit> {
+            Files.delete(Path.of(name))
+        }
+            .subscribeOn(scheduler)
     }
 
 }
