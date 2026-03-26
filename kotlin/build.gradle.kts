@@ -3,7 +3,6 @@ plugins {
 }
 
 dependencies {
-    implementation(libs.reactor.core)
     testImplementation(libs.kotest.runner)
     testImplementation(libs.kotest.assertions)
 }
