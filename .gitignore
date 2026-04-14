@@ -2,12 +2,16 @@
 .idea/
 *.iml
 out/
+bin/
 *.ipr
 *.iws
 
 # Gradle
 .gradle/
 build/
+
+# Kotlin
+.kotlin/
 
 # Java
 *.class
