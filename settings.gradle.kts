@@ -1,3 +1,12 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+includeBuild("gradle/build-logic")
+
 rootProject.name = "brain-latency"
 
 include("io-model")
