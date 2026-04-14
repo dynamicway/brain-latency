@@ -10,6 +10,7 @@ version = "0.0.1-SNAPSHOT"
 description = "spring-web"
 
 dependencies {
+    implementation(project(":nio-sample:mydata-domain"))
     implementation("org.springframework.boot:spring-boot-h2console")
     runtimeOnly("com.h2database:h2")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
