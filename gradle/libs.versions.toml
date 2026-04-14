@@ -1,0 +1,22 @@
+[versions]
+kotlin = "2.2.21"
+kotest = "5.9.1"
+reactor = "3.6.11"
+coroutines = "1.10.1"
+springBoot = "4.0.5"
+springDependencyManagement = "1.1.7"
+junit = "5.11.4"
+springCloud = "2025.1.1"
+
+[libraries]
+kotlin-gradle-plugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-allopen = { group = "org.jetbrains.kotlin", name = "kotlin-allopen", version.ref = "kotlin" }
+kotlin-noarg = { group = "org.jetbrains.kotlin", name = "kotlin-noarg", version.ref = "kotlin" }
+spring-boot-gradle-plugin = { group = "org.springframework.boot", name = "spring-boot-gradle-plugin", version.ref = "springBoot" }
+spring-dependency-management-plugin = { group = "io.spring.gradle", name = "dependency-management-plugin", version.ref = "springDependencyManagement" }
+
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+reactor-core = { group = "io.projectreactor", name = "reactor-core", version.ref = "reactor" }
+kotest-runner-junit5 = { group = "io.kotest", name = "kotest-runner-junit5", version.ref = "kotest" }
+kotest-assertions-core = { group = "io.kotest", name = "kotest-assertions-core", version.ref = "kotest" }

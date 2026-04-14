@@ -1,6 +1,9 @@
 spring:
   application:
     name: mock-bank
+  threads:
+    virtual:
+      enabled: true
 
 server:
   port: 8081
