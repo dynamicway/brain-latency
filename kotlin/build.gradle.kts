@@ -1,18 +1,9 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    id("kotlin-module")
+    id("kotlin-test-module")
 }
 
 dependencies {
-    implementation(libs.kotlinx.coroutines.core)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.kotest.runner)
-    testImplementation(libs.kotest.assertions)
-}
-
-kotlin {
-    jvmToolchain(21)
-}
-
-tasks.test {
-    useJUnitPlatform()
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:${Versions.coroutines}")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${Versions.coroutines}")
 }

@@ -1,17 +1,8 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    id("kotlin-module")
+    id("kotlin-test-module")
 }
 
 dependencies {
-    implementation(libs.reactor.core)
-    testImplementation(libs.kotest.runner)
-    testImplementation(libs.kotest.assertions)
-}
-
-kotlin {
-    jvmToolchain(21)
-}
-
-tasks.test {
-    useJUnitPlatform()
+    implementation("io.projectreactor:reactor-core:${Versions.reactor}")
 }
