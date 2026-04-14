@@ -1,21 +1,11 @@
 package bee.brainlatency.iomodel;
 
+import java.util.concurrent.CompletableFuture;
+
 class NonBlockingBarista {
-    private Coffee coffee;
-    private boolean ready = false;
 
-    void makeCoffee() {
-        new Thread(() -> {
-            this.coffee = Coffee.brew();
-            this.ready = true;
-        }).start();
+    CompletableFuture<Coffee> makeCoffee() {
+        return Coffee.brew();
     }
 
-    boolean isReady() {
-        return ready;
-    }
-
-    Coffee getCoffee() {
-        return coffee;
-    }
 }

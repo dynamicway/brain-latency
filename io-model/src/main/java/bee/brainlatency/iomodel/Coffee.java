@@ -1,16 +1,13 @@
 package bee.brainlatency.iomodel;
 
+import java.util.concurrent.CompletableFuture;
+
 class Coffee {
     private Coffee() {
 
     }
 
-    static Coffee brew() {
-        try {
-            Thread.sleep(1000);
-            return new Coffee();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+    static CompletableFuture<Coffee> brew() {
+        return CompletableFuture.supplyAsync(Coffee::new);
     }
 }
