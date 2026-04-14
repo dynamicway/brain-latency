@@ -6,4 +6,5 @@ object Versions {
     const val springBoot = "4.0.5"
     const val springDependencyManagement = "1.1.7"
     const val junit = "5.11.4"
+    const val springCloud = "2025.1.1"
 }
