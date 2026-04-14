@@ -11,7 +11,7 @@ class AccountController {
 
     @GetMapping("/{orgCode}")
     fun getAccounts(@PathVariable orgCode: String): List<Long> {
-        Thread.sleep(100)
+        Thread.sleep(1000)
 
         return listOf(1, 2, 3)
     }
