@@ -15,7 +15,7 @@ class TransactionController {
         @PathVariable orgCode: String,
         @PathVariable accountId: Long,
     ): List<Transaction> {
-        Thread.sleep(10)
+        Thread.sleep(100)
 
         return listOf(Transaction(1, "brain-buster", 100_000_000.0), Transaction(2, "nuclear", 300_000_000.0))
     }
