@@ -16,4 +16,13 @@ dependencies {
 
 tasks.named<Test>("test") {
     useJUnitPlatform()
+    exclude("**/OomTest*")
+}
+
+tasks.register<Test>("oomTest") {
+    useJUnitPlatform()
+    jvmArgs("-Xmx200m")
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    include("**/OomTest*")
 }
