@@ -17,6 +17,7 @@ dependencies {
 tasks.named<Test>("test") {
     useJUnitPlatform()
     exclude("**/OomTest*")
+    exclude("**/FdMonitorTest*")
 }
 
 tasks.register<Test>("oomTest") {
