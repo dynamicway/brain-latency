@@ -8,6 +8,8 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.RedisSerializer
 import org.springframework.data.redis.serializer.StringRedisSerializer
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration
 import java.util.concurrent.Callable
 import java.util.concurrent.atomic.AtomicInteger
@@ -51,6 +53,53 @@ class RedisLeaseCacheTest : StringSpec({
         shouldThrow<UnsupportedOperationException> {
             cache.evictIfPresent("resource-4")
         }
+    }
+
+    // Runs cache.evict(key) inside a simulated transaction and completes it with
+    // [completionStatus], asserting the entry survives until completion.
+    fun evictInTransaction(key: String, completionStatus: Int) {
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            cache.evict(key)
+            // deferred: still cached until the transaction completes
+            redisTemplate.hasKey("test-lease::$key") shouldBe true
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach { it.afterCompletion(completionStatus) }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
+    }
+
+    "evict inside a transaction is deferred and runs after commit" {
+        cache.get("resource-11", Callable { "value" })
+
+        evictInTransaction("resource-11", TransactionSynchronization.STATUS_COMMITTED)
+
+        redisTemplate.hasKey("test-lease::resource-11") shouldBe false
+    }
+
+    "evict still runs when the commit outcome is unknown (e.g. commit timeout)" {
+        cache.get("resource-12", Callable { "value" })
+
+        evictInTransaction("resource-12", TransactionSynchronization.STATUS_UNKNOWN)
+
+        redisTemplate.hasKey("test-lease::resource-12") shouldBe false
+    }
+
+    "evict is skipped on rollback so the still-valid cached value survives" {
+        cache.get("resource-13", Callable { "value" })
+
+        evictInTransaction("resource-13", TransactionSynchronization.STATUS_ROLLED_BACK)
+
+        cache.get("resource-13", Callable { "reloaded" }) shouldBe "value"
+    }
+
+    "evict outside a transaction removes the entry immediately" {
+        cache.get("resource-14", Callable { "value" })
+
+        cache.evict("resource-14")
+
+        redisTemplate.hasKey("test-lease::resource-14") shouldBe false
     }
 
     "a zombie loader whose lease was taken over cannot overwrite the newer entry" {

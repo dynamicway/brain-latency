@@ -1,6 +1,8 @@
 package bee.brainlatency.redisleasecache
 
 import org.springframework.cache.Cache
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration
 import java.util.concurrent.Callable
 
@@ -28,6 +30,13 @@ import java.util.concurrent.Callable
  * (the default) -- evict after the method runs. `beforeInvocation = true` routes to
  * [evictIfPresent], which this cache rejects: evicting before invocation would race
  * the very load lease this cache exists to coordinate.
+ *
+ * Inside a transaction, [evict] is deferred to after completion and runs unless the
+ * transaction rolled back. Keying off completion status rather than `afterCommit`
+ * covers the commit-timeout case: the outcome is then *unknown* -- the database may
+ * well have committed -- so the entry is evicted anyway and the next read reloads,
+ * rather than potentially serving a value the database no longer holds. Only a
+ * certain rollback keeps the entry, since the database is then known unchanged.
  */
 class RedisLeaseCache(
     private val name: String,
@@ -85,8 +94,23 @@ class RedisLeaseCache(
         throw UnsupportedOperationException("RedisLeaseCache does not support tokenless put(); values are published only by the granted loader")
     }
 
+    // Deferred inside a transaction: the entry must outlive the transaction so
+    // concurrent readers keep hitting the still-valid value, and must go on every
+    // outcome except a certain rollback -- including commit timeout, where the
+    // database may have committed (see the class doc).
     override fun evict(key: Any) {
-        store.evict(redisKey(key))
+        val redisKey = redisKey(key)
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            store.evict(redisKey)
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCompletion(status: Int) {
+                if (status != TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    store.evict(redisKey)
+                }
+            }
+        })
     }
 
     // evictIfPresent backs @CacheEvict(beforeInvocation = true) -- evict before the
