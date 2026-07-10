@@ -1,0 +1,36 @@
+package bee.brainlatency.redisleasecache
+
+import org.springframework.data.redis.core.RedisTemplate
+import java.time.Duration
+
+/**
+ * The Redis I/O behind [RedisLeaseCache]: runs the Lua in [RedisLeaseCacheScripts]
+ * and marshals the arguments (keys, framed entries, TTLs as millis bytes), so the
+ * cache deals in domain terms -- an entry, a lease, a TTL -- and never touches
+ * KEYS/ARGV ordering or byte-encoded durations.
+ */
+class LeaseCacheStore(private val redisTemplate: RedisTemplate<String, ByteArray>) {
+
+    /** Atomically return the entry at [key], or write [leaseEntry] (living [leaseTtl]) and return it. */
+    fun getOrAcquire(key: String, leaseEntry: ByteArray, leaseTtl: Duration): ByteArray =
+        redisTemplate.execute(
+            RedisLeaseCacheScripts.GET_OR_ACQUIRE,
+            listOf(key),
+            leaseEntry,
+            leaseTtl.toMillis().toString().toByteArray(),
+        ) ?: error("GET_OR_ACQUIRE returned null")
+
+    /** Write [payload] at [key] (living [valueTtl]) only if it still holds [leaseEntry]. */
+    fun publish(key: String, leaseEntry: ByteArray, payload: ByteArray, valueTtl: Duration) {
+        redisTemplate.execute(
+            RedisLeaseCacheScripts.PUBLISH,
+            listOf(key),
+            leaseEntry,
+            payload,
+            valueTtl.toMillis().toString().toByteArray(),
+        )
+    }
+
+    /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
+    fun evict(key: String): Boolean = redisTemplate.delete(key)
+}
