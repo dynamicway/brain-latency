@@ -47,6 +47,12 @@ class RedisLeaseCacheTest : StringSpec({
         }
     }
 
+    "evictIfPresent is unsupported so beforeInvocation = true misuse fails fast" {
+        shouldThrow<UnsupportedOperationException> {
+            cache.evictIfPresent("resource-4")
+        }
+    }
+
     "a zombie loader whose lease was taken over cannot overwrite the newer entry" {
         val zombieLoader = Callable {
             // simulate our lease being lost and a new holder publishing a fresh value
@@ -100,8 +106,8 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "get(valueLoader) does not wait while another loader holds the lease (polling is a TODO)" {
-        // simulate another loader holding the load lease (a T-tagged framed entry)
-        val foreignLease = byteArrayOf('T'.code.toByte()) + "someone-else".toByteArray()
+        // simulate another loader holding the load lease
+        val foreignLease = codec.newLease()
         redisTemplate.opsForValue().set("test-lease::resource-9", foreignLease, Duration.ofSeconds(5))
 
         shouldThrow<UnsupportedOperationException> {

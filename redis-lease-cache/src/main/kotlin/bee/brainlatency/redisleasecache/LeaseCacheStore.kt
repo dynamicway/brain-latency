@@ -17,7 +17,7 @@ class LeaseCacheStore(private val redisTemplate: RedisTemplate<String, ByteArray
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
             leaseEntry,
-            leaseTtl.toMillis().toString().toByteArray(),
+            leaseTtl.toArgvMillis(),
         ) ?: error("GET_OR_ACQUIRE returned null")
 
     /** Write [payload] at [key] (living [valueTtl]) only if it still holds [leaseEntry]. */
@@ -27,10 +27,13 @@ class LeaseCacheStore(private val redisTemplate: RedisTemplate<String, ByteArray
             listOf(key),
             leaseEntry,
             payload,
-            valueTtl.toMillis().toString().toByteArray(),
+            valueTtl.toArgvMillis(),
         )
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
     fun evict(key: String): Boolean = redisTemplate.delete(key)
+
+    // Lua PX arguments travel as decimal-string bytes, like every other ARGV.
+    private fun Duration.toArgvMillis(): ByteArray = toMillis().toString().toByteArray()
 }

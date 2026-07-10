@@ -14,12 +14,12 @@ class LeaseCacheCodec(private val valueSerializer: RedisSerializer<Any>) {
 
     /** A fresh, uniquely-identified load-lease entry to attempt acquisition with. */
     fun newLease(): ByteArray =
-        byteArrayOf(TOKEN_TAG) + UUID.randomUUID().toString().toByteArray(Charsets.UTF_8)
+        frame(TOKEN_TAG, UUID.randomUUID().toString().toByteArray(Charsets.UTF_8))
 
     /** Frames a loaded value, or a null as a negative-cache marker, for storage. */
     fun valueEntry(value: Any?): ByteArray =
-        if (value == null) byteArrayOf(NULL_TAG)
-        else byteArrayOf(VALUE_TAG) + (valueSerializer.serialize(value) ?: ByteArray(0))
+        if (value == null) frame(NULL_TAG)
+        else frame(VALUE_TAG, valueSerializer.serialize(value) ?: ByteArray(0))
 
     /** Interprets a raw stored entry. */
     fun decode(raw: ByteArray): LeaseCacheEntry =
@@ -29,6 +29,9 @@ class LeaseCacheCodec(private val valueSerializer: RedisSerializer<Any>) {
             TOKEN_TAG -> LeaseCacheEntry.Held(raw)
             else -> error("unrecognized cache entry tag: ${raw.firstOrNull()}")
         }
+
+    private fun frame(tag: Byte, payload: ByteArray = ByteArray(0)): ByteArray =
+        byteArrayOf(tag) + payload
 
     private companion object {
         const val TOKEN_TAG = 'T'.code.toByte()

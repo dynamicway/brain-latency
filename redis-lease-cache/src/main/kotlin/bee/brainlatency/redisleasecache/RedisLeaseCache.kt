@@ -23,6 +23,11 @@ import java.util.concurrent.Callable
  * plain value [get] and the tokenless [put] throw, so misapplying the cache surfaces
  * on the first call instead of silently working on hits and breaking on the first
  * miss. Typed [get] and [clear] are unsupported too.
+ *
+ * Eviction is likewise only supported with `@CacheEvict(beforeInvocation = false)`
+ * (the default) -- evict after the method runs. `beforeInvocation = true` routes to
+ * [evictIfPresent], which this cache rejects: evicting before invocation would race
+ * the very load lease this cache exists to coordinate.
  */
 class RedisLeaseCache(
     private val name: String,
@@ -84,8 +89,12 @@ class RedisLeaseCache(
         store.evict(redisKey(key))
     }
 
-    override fun evictIfPresent(key: Any): Boolean =
-        store.evict(redisKey(key))
+    // evictIfPresent backs @CacheEvict(beforeInvocation = true) -- evict before the
+    // method runs. Rejected fail-fast: an eviction that fires before invocation could
+    // race a concurrent load lease acquisition for the same key.
+    override fun evictIfPresent(key: Any): Boolean {
+        throw UnsupportedOperationException("RedisLeaseCache does not support evictIfPresent(); use @CacheEvict(beforeInvocation = false), the default")
+    }
 
     // The plain value getter is the `@Cacheable(sync = false)` read path, which this
     // cache does not support (that path would then call the unsupported put). Failing
@@ -96,7 +105,7 @@ class RedisLeaseCache(
     }
 
     override fun <T : Any> get(key: Any, type: Class<T>?): T? {
-        throw UnsupportedOperationException("RedisLeaseCache does not support typed get; use get(key) instead")
+        throw UnsupportedOperationException("RedisLeaseCache only works via @Cacheable(sync = true) / get(key, valueLoader); typed get(key, type) is unsupported")
     }
 
     override fun clear() {
