@@ -179,13 +179,39 @@ class RedisLeaseCacheTest : StringSpec({
         loads.get() shouldBe 1
     }
 
-    "get(valueLoader) does not wait while another loader holds the lease (polling is a TODO)" {
-        // simulate another loader holding the load lease
+    "a waiter polls while another loader holds the lease and returns the published value" {
+        // simulate another loader holding the load lease and publishing shortly after
         val foreignLease = codec.newLease()
         redisTemplate.opsForValue().set("test-lease::resource-9", foreignLease, Duration.ofSeconds(5))
+        Thread {
+            Thread.sleep(200)
+            store.publish("test-lease::resource-9", foreignLease, codec.valueEntry("published"), Duration.ofSeconds(5))
+        }.start()
 
-        shouldThrow<UnsupportedOperationException> {
-            cache.get("resource-9", Callable { "value" })
+        cache.get("resource-9", Callable { "should-not-load" }) shouldBe "published"
+    }
+
+    "a waiter takes over when the holder's lease expires without a publish" {
+        // a foreign lease that dies without publishing
+        val foreignLease = codec.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-17", foreignLease, Duration.ofMillis(200))
+
+        cache.get("resource-17", Callable { "took-over" }) shouldBe "took-over"
+    }
+
+    "a waiter gives up after waitTimeout while the lease is still held" {
+        val impatientCache = RedisLeaseCache(
+            "test-lease", store, codec,
+            leaseTtl = Duration.ofSeconds(5),
+            valueTtl = Duration.ofSeconds(5),
+            pollInterval = Duration.ofMillis(50),
+            waitTimeout = Duration.ofMillis(300),
+        )
+        val foreignLease = codec.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-18", foreignLease, Duration.ofSeconds(5))
+
+        shouldThrow<IllegalStateException> {
+            impatientCache.get("resource-18", Callable { "value" })
         }
     }
 })

@@ -10,12 +10,14 @@ class RedisLeaseCacheManager(
     private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
     private val valueTtl: Duration,
+    private val pollInterval: Duration = Duration.ofMillis(50),
+    private val waitTimeout: Duration = leaseTtl.multipliedBy(2),
 ) : CacheManager {
 
     private val caches = ConcurrentHashMap<String, RedisLeaseCache>()
 
     override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { RedisLeaseCache(it, store, codec, leaseTtl, valueTtl) }
+        caches.computeIfAbsent(name) { RedisLeaseCache(it, store, codec, leaseTtl, valueTtl, pollInterval, waitTimeout) }
 
     override fun getCacheNames(): Collection<String> = caches.keys
 }

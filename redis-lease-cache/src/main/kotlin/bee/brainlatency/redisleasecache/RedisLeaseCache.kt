@@ -5,11 +5,14 @@ import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Duration
 import java.util.concurrent.Callable
+import kotlin.random.Random
 
 /**
  * A Redis-backed [Cache] that gives `@Cacheable(sync = true)` cross-instance
  * stampede protection: on a miss exactly one caller is *granted* a short-lived
- * load lease and runs the loader, while the rest see the key is *loading*. The
+ * load lease and runs the loader, while the rest poll until the value is
+ * published -- or, if the lease expires because the loader died, until one of
+ * them is granted and takes over. Waiting is bounded by [waitTimeout]. The
  * lease is purely an internal load lock -- it lives only for the duration of one
  * load, is released the moment the loader throws, and expires after [leaseTtl]
  * only if the loader dies without unwinding.
@@ -45,6 +48,8 @@ class RedisLeaseCache(
     private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
     private val valueTtl: Duration,
+    private val pollInterval: Duration = Duration.ofMillis(50),
+    private val waitTimeout: Duration = leaseTtl.multipliedBy(2),
 ) : Cache {
 
     override fun getName(): String = name
@@ -52,28 +57,39 @@ class RedisLeaseCache(
     override fun getNativeCache(): Any = store
 
     // Single-flight load: atomically read the entry or acquire the load lease, then
-    // act on the resulting state (hit / hit-null / granted / loading).
+    // act on the resulting state (hit / hit-null / granted / loading). While another
+    // loader holds the lease we poll: each retry re-runs the same atomic step, so
+    // the moment the value lands we return it, and if the lease expires instead
+    // (the loader died) we are granted and take over.
     override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? {
-        val leaseEntry = codec.newLease()
-        val raw = store.getOrAcquire(redisKey(key), leaseEntry, leaseTtl)
+        val deadline = System.nanoTime() + waitTimeout.toNanos()
+        while (true) {
+            val leaseEntry = codec.newLease()
+            val raw = store.getOrAcquire(redisKey(key), leaseEntry, leaseTtl)
 
-        return when (val entry = codec.decode(raw)) {
-            is LeaseCacheEntry.Value -> {
-                @Suppress("UNCHECKED_CAST")
-                entry.value as T?
-            }
-
-            is LeaseCacheEntry.Held ->
-                if (entry.isHeldBy(leaseEntry)) {
-                    loadAndPublish(key, leaseEntry, valueLoader)
-                } else {
-                    // another loader holds the lease -- someone else is loading.
-                    // TODO: waiter polling. Re-run getOrAcquire with backoff until the
-                    //       key flips to a value (loader finished) or the lease expires
-                    //       (loader died -> we get granted and take over). No wait yet.
-                    throw UnsupportedOperationException("another loader holds the lease for key [$key]; waiter polling not yet implemented")
+            when (val entry = codec.decode(raw)) {
+                is LeaseCacheEntry.Value -> {
+                    @Suppress("UNCHECKED_CAST")
+                    return entry.value as T?
                 }
+
+                is LeaseCacheEntry.Held -> {
+                    if (entry.isHeldBy(leaseEntry)) {
+                        return loadAndPublish(key, leaseEntry, valueLoader)
+                    }
+                    if (System.nanoTime() >= deadline) {
+                        throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
+                    }
+                    sleepBeforeRepoll()
+                }
+            }
         }
+    }
+
+    // Jittered so a herd of waiters woken by the same miss doesn't re-poll in lockstep.
+    private fun sleepBeforeRepoll() {
+        val base = pollInterval.toMillis()
+        Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
     private fun <T : Any> loadAndPublish(key: Any, leaseEntry: ByteArray, valueLoader: Callable<T>): T? {
