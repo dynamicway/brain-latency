@@ -31,6 +31,11 @@ class LeaseCacheStore(private val redisTemplate: RedisTemplate<String, ByteArray
         )
     }
 
+    /** Delete [key] only if it still holds [leaseEntry], releasing an in-flight lease. */
+    fun release(key: String, leaseEntry: ByteArray) {
+        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseEntry)
+    }
+
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
     fun evict(key: String): Boolean = redisTemplate.delete(key)
 

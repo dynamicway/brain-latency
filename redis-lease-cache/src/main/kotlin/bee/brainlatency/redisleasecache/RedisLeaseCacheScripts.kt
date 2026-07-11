@@ -31,4 +31,16 @@ object RedisLeaseCacheScripts {
         end
     """.trimIndent()
     val PUBLISH: DefaultRedisScript<Long> = DefaultRedisScript(publish, Long::class.java)
+
+    // Token-fenced release (the classic Redlock unlock shape): delete the key only
+    // if it still holds our lease entry. Returns 1 if released, 0 if the lease was
+    // already lost (expired / taken over), leaving the newer entry intact.
+    private val release = """
+        if redis.call('get', KEYS[1]) == ARGV[1] then
+            return redis.call('del', KEYS[1])
+        else
+            return 0
+        end
+    """.trimIndent()
+    val RELEASE: DefaultRedisScript<Long> = DefaultRedisScript(release, Long::class.java)
 }

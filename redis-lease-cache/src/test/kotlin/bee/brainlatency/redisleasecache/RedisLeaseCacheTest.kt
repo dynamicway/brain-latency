@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import org.springframework.cache.Cache
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.RedisSerializer
@@ -100,6 +101,30 @@ class RedisLeaseCacheTest : StringSpec({
         cache.evict("resource-14")
 
         redisTemplate.hasKey("test-lease::resource-14") shouldBe false
+    }
+
+    "a failing loader releases the lease so the next caller reloads immediately" {
+        shouldThrow<Cache.ValueRetrievalException> {
+            cache.get("resource-15", Callable<String> { error("boom") })
+        }
+
+        // lease released on failure -- no waiting out leaseTtl before the retry
+        cache.get("resource-15", Callable { "recovered" }) shouldBe "recovered"
+    }
+
+    "a zombie loader's failure does not release a lease it no longer holds" {
+        val zombieLoader = Callable<String> {
+            // simulate our lease being lost and a new holder publishing a fresh value
+            cache.evict("resource-16")
+            cache.get("resource-16", Callable { "fresh" })
+            error("boom")
+        }
+
+        shouldThrow<Cache.ValueRetrievalException> {
+            cache.get("resource-16", zombieLoader)
+        }
+        // the fenced release did NOT delete the newer holder's value
+        cache.get("resource-16", Callable { "reloaded" }) shouldBe "fresh"
     }
 
     "a zombie loader whose lease was taken over cannot overwrite the newer entry" {

@@ -11,7 +11,8 @@ import java.util.concurrent.Callable
  * stampede protection: on a miss exactly one caller is *granted* a short-lived
  * load lease and runs the loader, while the rest see the key is *loading*. The
  * lease is purely an internal load lock -- it lives only for the duration of one
- * load and expires after [leaseTtl] if the loader dies.
+ * load, is released the moment the loader throws, and expires after [leaseTtl]
+ * only if the loader dies without unwinding.
  *
  * This class only orchestrates the states. Byte framing lives in [LeaseCacheCodec]
  * and Redis I/O in [LeaseCacheStore], so it deals in domain terms: the granted
@@ -80,9 +81,14 @@ class RedisLeaseCache(
         // value lands only if the key still holds our lease entry, so a zombie loader
         // whose lease expired can't clobber the holder that took over. Either way we
         // return the loaded value to our own caller.
-        // TODO: if valueLoader.call() throws, release the lease (CAS-del our entry) so
-        //       a waiter takes over immediately instead of waiting out leaseTtl.
-        val loaded: T? = valueLoader.call()
+        val loaded: T? = try {
+            valueLoader.call()
+        } catch (ex: Throwable) {
+            // Release the lease (CAS-del, fenced like publish) so a waiter takes over
+            // immediately instead of waiting out leaseTtl.
+            store.release(redisKey(key), leaseEntry)
+            throw Cache.ValueRetrievalException(key, valueLoader, ex)
+        }
         store.publish(redisKey(key), leaseEntry, codec.valueEntry(loaded), valueTtl)
         return loaded
     }
