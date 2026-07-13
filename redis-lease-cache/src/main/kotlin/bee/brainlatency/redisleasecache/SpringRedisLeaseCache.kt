@@ -6,7 +6,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.concurrent.Callable
 
 /**
- * The Spring [Cache] contract for a [LeaseTokenCache]: a thin adapter that maps the
+ * The Spring [Cache] contract for a [LeaseCache]: a thin adapter that maps the
  * `@Cacheable` / `@CacheEvict` surface onto the lease-token protocol and rejects every
  * mode the protocol can't honour. All the stampede coordination -- the load lease,
  * polling, token-fenced publish -- lives in the [delegate]; this class only owns the
@@ -32,9 +32,9 @@ import java.util.concurrent.Callable
  * rather than potentially serving a value the database no longer holds. Only a
  * certain rollback keeps the entry, since the database is then known unchanged.
  */
-class SpringRedisLeaseTokenCache(
+class SpringRedisLeaseCache(
     private val name: String,
-    private val delegate: LeaseTokenCache,
+    private val delegate: LeaseCache,
 ) : Cache {
 
     override fun getName(): String = name
@@ -45,10 +45,10 @@ class SpringRedisLeaseTokenCache(
     override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? = delegate.get(redisKey(key), valueLoader)
 
     // A value may be written only by the loader that holds the lease, fencing the
-    // write on its lease entry (see [LeaseTokenCache]). A tokenless put has no such
+    // write on its lease entry (see [LeaseCache]). A tokenless put has no such
     // proof, so allowing it would let anyone overwrite the cache and defeat the lease.
     override fun put(key: Any, value: Any?) {
-        throw UnsupportedOperationException("SpringRedisLeaseTokenCache does not support tokenless put(); values are published only by the granted loader")
+        throw UnsupportedOperationException("SpringRedisLeaseCache does not support tokenless put(); values are published only by the granted loader")
     }
 
     // Deferred inside a transaction: the entry must outlive the transaction so
@@ -74,7 +74,7 @@ class SpringRedisLeaseTokenCache(
     // method runs. Rejected fail-fast: an eviction that fires before invocation could
     // race a concurrent load lease acquisition for the same key.
     override fun evictIfPresent(key: Any): Boolean {
-        throw UnsupportedOperationException("SpringRedisLeaseTokenCache does not support evictIfPresent(); use @CacheEvict(beforeInvocation = false), the default")
+        throw UnsupportedOperationException("SpringRedisLeaseCache does not support evictIfPresent(); use @CacheEvict(beforeInvocation = false), the default")
     }
 
     // The plain value getter is the `@Cacheable(sync = false)` read path, which this
@@ -82,15 +82,15 @@ class SpringRedisLeaseTokenCache(
     // fast here surfaces the misconfiguration on the very first call, rather than
     // silently working on hits and blowing up on the first miss.
     override fun get(key: Any): Cache.ValueWrapper? {
-        throw UnsupportedOperationException("SpringRedisLeaseTokenCache only works via @Cacheable(sync = true) / get(key, valueLoader); the plain get(key) used by sync = false is unsupported")
+        throw UnsupportedOperationException("SpringRedisLeaseCache only works via @Cacheable(sync = true) / get(key, valueLoader); the plain get(key) used by sync = false is unsupported")
     }
 
     override fun <T : Any> get(key: Any, type: Class<T>?): T? {
-        throw UnsupportedOperationException("SpringRedisLeaseTokenCache only works via @Cacheable(sync = true) / get(key, valueLoader); typed get(key, type) is unsupported")
+        throw UnsupportedOperationException("SpringRedisLeaseCache only works via @Cacheable(sync = true) / get(key, valueLoader); typed get(key, type) is unsupported")
     }
 
     override fun clear() {
-        throw UnsupportedOperationException("SpringRedisLeaseTokenCache does not support clear(); evict entries individually")
+        throw UnsupportedOperationException("SpringRedisLeaseCache does not support clear(); evict entries individually")
     }
 
     private fun redisKey(key: Any): String = "$name::$key"

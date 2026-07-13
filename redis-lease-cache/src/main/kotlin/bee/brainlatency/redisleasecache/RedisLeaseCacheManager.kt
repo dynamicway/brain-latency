@@ -16,12 +16,12 @@ class RedisLeaseCacheManager(
 
     // Name-agnostic engine shared by every named cache; the per-name adapters below
     // namespace the keys they hand it.
-    private val leaseTokenCache = LeaseTokenCache(store, codec, leaseTtl, valueTtl, pollInterval, waitTimeout)
+    private val leaseCache = LeaseCache(store, codec, leaseTtl, valueTtl, pollInterval, waitTimeout)
 
-    private val caches = ConcurrentHashMap<String, SpringRedisLeaseTokenCache>()
+    private val caches = ConcurrentHashMap<String, SpringRedisLeaseCache>()
 
     override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { SpringRedisLeaseTokenCache(it, leaseTokenCache) }
+        caches.computeIfAbsent(name) { SpringRedisLeaseCache(it, leaseCache) }
 
     override fun getCacheNames(): Collection<String> = caches.keys
 }

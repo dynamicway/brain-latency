@@ -7,7 +7,7 @@ import kotlin.random.Random
 
 /**
  * The lease-token cache proper: the cross-instance stampede protection that
- * [SpringRedisLeaseTokenCache] exposes to Spring. On a miss exactly one caller is
+ * [SpringRedisLeaseCache] exposes to Spring. On a miss exactly one caller is
  * *granted* a short-lived load lease and runs the loader, while the rest poll until
  * the value is published -- or, if the lease expires because the loader died, until one
  * of them is granted and takes over. Waiting is bounded by [waitTimeout]. The lease is
@@ -23,13 +23,13 @@ import kotlin.random.Random
  * cannot overwrite the newer holder's fresh entry.
  *
  * It is name-agnostic and stateless beyond its config, so a single instance backs every
- * named cache: the [SpringRedisLeaseTokenCache] adapter owns the cache name and hands
+ * named cache: the [SpringRedisLeaseCache] adapter owns the cache name and hands
  * down already-namespaced Redis keys. It knows nothing of Spring's [Cache] contract --
  * the loader-less read/write path, the eviction modes, transaction-deferred eviction --
  * exposing only the two operations the lease protocol actually has: a single-flight
  * [get] with a loader, and an immediate [evict].
  */
-class LeaseTokenCache(
+class LeaseCache(
     private val store: LeaseCacheStore,
     private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
