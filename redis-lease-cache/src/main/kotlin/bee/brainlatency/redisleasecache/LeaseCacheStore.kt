@@ -27,7 +27,7 @@ class LeaseCacheStore(
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
-            leaseToken.bytes,
+            leaseToken.toRedisArg(),
             leaseTtl.toArgvMillis(),
         ) ?: error("GET_OR_ACQUIRE returned null")
         return codec.decode(raw)
@@ -38,7 +38,7 @@ class LeaseCacheStore(
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
-            leaseToken.bytes,
+            leaseToken.toRedisArg(),
             codec.valueEntry(value),
             valueTtl.toArgvMillis(),
         )
@@ -46,7 +46,7 @@ class LeaseCacheStore(
 
     /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
     fun release(key: String, leaseToken: LeaseToken) {
-        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseToken.bytes)
+        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseToken.toRedisArg())
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
