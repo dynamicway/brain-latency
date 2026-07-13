@@ -27,19 +27,19 @@ import java.util.concurrent.Callable
  * [evictIfPresent], which this cache rejects: evicting before invocation would race
  * the very load lease the delegate exists to coordinate.
  *
- * [evict] also defers to the surrounding transaction, when there is one: the entry must
- * outlive the transaction so concurrent readers keep hitting the still-valid value
- * while it's in flight, and eviction must run on every outcome except a certain
- * rollback -- including commit timeout, where the database may have committed. Keying
- * off completion status rather than `afterCommit` covers that unknown-outcome case: the
- * entry is evicted anyway and the next read reloads, rather than potentially serving a
- * value the database no longer holds. Only a certain rollback keeps the entry, since
- * the database is then known unchanged. Unlike Spring's own
- * `TransactionAwareCacheDecorator` (which only ever evicts `afterCommit`), this also
+ * [evict] also defers to the surrounding transaction, when there is one -- the name
+ * this class keeps: the entry must outlive the transaction so concurrent readers keep
+ * hitting the still-valid value while it's in flight, and eviction must run on every
+ * outcome except a certain rollback -- including commit timeout, where the database may
+ * have committed. Keying off completion status rather than `afterCommit` covers that
+ * unknown-outcome case: the entry is evicted anyway and the next read reloads, rather
+ * than potentially serving a value the database no longer holds. Only a certain
+ * rollback keeps the entry, since the database is then known unchanged. Unlike Spring's
+ * own `TransactionAwareCacheDecorator` (which only ever evicts `afterCommit`), this also
  * evicts on an unknown completion status, for the reason above. Outside a transaction,
  * eviction runs immediately.
  */
-class SpringRedisLeaseCache(
+class TransactionAwareEvictCache(
     private val name: String,
     private val delegate: LeaseCache,
 ) : Cache {
@@ -62,7 +62,7 @@ class SpringRedisLeaseCache(
     // write on its lease entry (see [LeaseCache]). A tokenless put has no such
     // proof, so allowing it would let anyone overwrite the cache and defeat the lease.
     override fun put(key: Any, value: Any?) {
-        throw UnsupportedOperationException("SpringRedisLeaseCache does not support tokenless put(); values are published only by the granted loader")
+        throw UnsupportedOperationException("TransactionAwareEvictCache does not support tokenless put(); values are published only by the granted loader")
     }
 
     override fun evict(key: Any) {
@@ -84,7 +84,7 @@ class SpringRedisLeaseCache(
     // method runs. Rejected fail-fast: an eviction that fires before invocation could
     // race a concurrent load lease acquisition for the same key.
     override fun evictIfPresent(key: Any): Boolean {
-        throw UnsupportedOperationException("SpringRedisLeaseCache does not support evictIfPresent(); use @CacheEvict(beforeInvocation = false), the default")
+        throw UnsupportedOperationException("TransactionAwareEvictCache does not support evictIfPresent(); use @CacheEvict(beforeInvocation = false), the default")
     }
 
     // The plain value getter is the `@Cacheable(sync = false)` read path, which this
@@ -92,15 +92,15 @@ class SpringRedisLeaseCache(
     // fast here surfaces the misconfiguration on the very first call, rather than
     // silently working on hits and blowing up on the first miss.
     override fun get(key: Any): Cache.ValueWrapper? {
-        throw UnsupportedOperationException("SpringRedisLeaseCache only works via @Cacheable(sync = true) / get(key, valueLoader); the plain get(key) used by sync = false is unsupported")
+        throw UnsupportedOperationException("TransactionAwareEvictCache only works via @Cacheable(sync = true) / get(key, valueLoader); the plain get(key) used by sync = false is unsupported")
     }
 
     override fun <T : Any> get(key: Any, type: Class<T>?): T? {
-        throw UnsupportedOperationException("SpringRedisLeaseCache only works via @Cacheable(sync = true) / get(key, valueLoader); typed get(key, type) is unsupported")
+        throw UnsupportedOperationException("TransactionAwareEvictCache only works via @Cacheable(sync = true) / get(key, valueLoader); typed get(key, type) is unsupported")
     }
 
     override fun clear() {
-        throw UnsupportedOperationException("SpringRedisLeaseCache does not support clear(); evict entries individually")
+        throw UnsupportedOperationException("TransactionAwareEvictCache does not support clear(); evict entries individually")
     }
 
     private fun redisKey(key: Any): String = "$name::$key"

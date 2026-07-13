@@ -23,7 +23,7 @@ import kotlin.random.Random
  * the CAS and cannot overwrite the newer holder's fresh entry.
  *
  * It is name-agnostic and stateless beyond its config, so a single instance backs every
- * named cache: an adapter (e.g. the Spring-facing `SpringRedisLeaseCache`) owns the
+ * named cache: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`) owns the
  * cache name and hands down already-namespaced keys. It exposes only the two operations
  * the lease protocol actually has: a single-flight [get] with a loader, and an
  * immediate [evict]. A failing loader surfaces as [LeaseCacheLoadException]; mapping
