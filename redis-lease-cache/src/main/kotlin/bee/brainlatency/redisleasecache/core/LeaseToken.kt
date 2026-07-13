@@ -13,7 +13,7 @@ package bee.brainlatency.redisleasecache.core
  * see them.
  */
 @JvmInline
-value class LeaseToken(private val bytes: ByteArray) {
+internal value class LeaseToken(private val bytes: ByteArray) {
 
     /** True if [other] identifies the same lease. */
     fun matches(other: LeaseToken): Boolean = bytes.contentEquals(other.bytes)

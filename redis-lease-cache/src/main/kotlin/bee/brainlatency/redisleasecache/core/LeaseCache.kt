@@ -22,14 +22,18 @@ import kotlin.random.Random
  * write. A slow "zombie" loader whose lease already expired (and was taken over) fails
  * the CAS and cannot overwrite the newer holder's fresh entry.
  *
- * It is name-agnostic and stateless beyond its config, so a single instance backs every
- * named cache: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`) owns the
- * cache name and hands down already-namespaced keys. It exposes only the two operations
- * the lease protocol actually has: a single-flight [get] with a loader, and an
- * immediate [evict]. A failing loader surfaces as [LeaseCacheLoadException]; mapping
+ * It is name-agnostic: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`)
+ * owns the cache name and hands down already-namespaced keys. It exposes only the two
+ * operations the lease protocol actually has: a single-flight [get] with a loader, and
+ * an immediate [evict]. A failing loader surfaces as [LeaseCacheLoadException]; mapping
  * that onto a framework's exception contract is the adapter's job.
+ *
+ * The constructor is `internal` -- outside this module, an instance is only obtained
+ * from `RedisLeaseCacheManagerFactory`, which alone knows how to wire the [store] (and
+ * everything behind it: the Redis client, the codec, the value serializer). Callers
+ * see this class and the factory only; the storage machinery never leaks out.
  */
-class LeaseCache(
+class LeaseCache internal constructor(
     private val store: LeaseCacheStore,
     private val leaseTtl: Duration,
     private val valueTtl: Duration,

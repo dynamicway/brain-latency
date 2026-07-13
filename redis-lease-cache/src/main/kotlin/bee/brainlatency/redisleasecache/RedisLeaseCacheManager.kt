@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * them even before first use; any other name is created lazily on first [getCache],
  * using [defaultCacheConfiguration].
  */
-class RedisLeaseCacheManager(
+internal class RedisLeaseCacheManager(
     private val store: LeaseCacheStore,
     private val defaultCacheConfiguration: LeaseCacheConfiguration,
     private val cacheConfigurations: Map<String, LeaseCacheConfiguration> = emptyMap(),

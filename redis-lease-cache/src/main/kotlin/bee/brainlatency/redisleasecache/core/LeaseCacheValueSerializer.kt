@@ -7,7 +7,7 @@ package bee.brainlatency.redisleasecache.core
  * cached null as a bare tag with no payload -- so implementations deal only in real
  * values.
  */
-interface LeaseCacheValueSerializer {
+internal interface LeaseCacheValueSerializer {
 
     fun serialize(value: Any): ByteArray
 

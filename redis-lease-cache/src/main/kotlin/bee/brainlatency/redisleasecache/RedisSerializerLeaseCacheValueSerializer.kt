@@ -8,7 +8,7 @@ import org.springframework.data.redis.serializer.RedisSerializer
  * strategy, so the codec can be backed by any of Spring's serializers (JDK, JSON, ...)
  * without the core depending on them.
  */
-class RedisSerializerLeaseCacheValueSerializer(
+internal class RedisSerializerLeaseCacheValueSerializer(
     private val delegate: RedisSerializer<Any>,
 ) : LeaseCacheValueSerializer {
 

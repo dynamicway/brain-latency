@@ -7,7 +7,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript
  * place so the store adapter and the Lua live apart. Both are binary-safe: KEYS/ARGV
  * are byte strings, so the framed entries pass through unchanged.
  */
-object RedisLeaseCacheScripts {
+internal object RedisLeaseCacheScripts {
 
     // Return the current entry if present, otherwise write our load lease and return
     // it -- one command, so the get and the acquire never interleave with another client.

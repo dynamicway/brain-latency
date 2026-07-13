@@ -17,7 +17,7 @@ import java.util.UUID
  * KEYS/ARGV ordering, byte-encoded durations, entry framing, or raw lease bytes:
  * [LeaseToken] unwraps to [ByteArray] only right here, at the Redis I/O boundary.
  */
-class RedisTemplateLeaseCacheStore(
+internal class RedisTemplateLeaseCacheStore(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
     private val codec: LeaseCacheCodec,
 ) : LeaseCacheStore {

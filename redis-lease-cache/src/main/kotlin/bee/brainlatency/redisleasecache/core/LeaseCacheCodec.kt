@@ -11,7 +11,7 @@ package bee.brainlatency.redisleasecache.core
  * Framing only: it wraps a lease token that already exists rather than generating
  * one -- minting the token itself is [LeaseCacheStore.newLease]'s job.
  */
-class LeaseCacheCodec(private val valueSerializer: LeaseCacheValueSerializer) {
+internal class LeaseCacheCodec(private val valueSerializer: LeaseCacheValueSerializer) {
 
     /** Frames [token] as a held load-lease entry. */
     fun leaseEntry(token: ByteArray): ByteArray = frame(TOKEN_TAG, token)
@@ -41,7 +41,7 @@ class LeaseCacheCodec(private val valueSerializer: LeaseCacheValueSerializer) {
 }
 
 /** A decoded cache entry: either a stored value or a held load lease. */
-sealed interface LeaseCacheEntry {
+internal sealed interface LeaseCacheEntry {
     /** A cached value, or `null` for a negatively cached miss. */
     data class Value(val value: Any?) : LeaseCacheEntry
 

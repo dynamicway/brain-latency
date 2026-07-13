@@ -39,7 +39,7 @@ import java.util.concurrent.Callable
  * evicts on an unknown completion status, for the reason above. Outside a transaction,
  * eviction runs immediately.
  */
-class TransactionAwareEvictCache(
+internal class TransactionAwareEvictCache(
     private val name: String,
     private val delegate: LeaseCache,
 ) : Cache {

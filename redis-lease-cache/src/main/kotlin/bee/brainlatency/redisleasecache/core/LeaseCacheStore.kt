@@ -13,7 +13,7 @@ import java.time.Duration
  * takes effect only while the key still holds that exact token, which is what keeps
  * zombie loaders from clobbering a newer holder.
  */
-interface LeaseCacheStore {
+internal interface LeaseCacheStore {
 
     /** A fresh, uniquely-identified lease token to attempt acquisition with. */
     fun newLease(): LeaseToken

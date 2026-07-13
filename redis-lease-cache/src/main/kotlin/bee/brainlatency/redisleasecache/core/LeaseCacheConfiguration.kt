@@ -14,6 +14,6 @@ data class LeaseCacheConfiguration(
     val pollInterval: Duration = Duration.ofMillis(50),
     val waitTimeout: Duration = leaseTtl.multipliedBy(2),
 ) {
-    fun toLeaseCache(store: LeaseCacheStore): LeaseCache =
+    internal fun toLeaseCache(store: LeaseCacheStore): LeaseCache =
         LeaseCache(store, leaseTtl, valueTtl, pollInterval, waitTimeout)
 }
