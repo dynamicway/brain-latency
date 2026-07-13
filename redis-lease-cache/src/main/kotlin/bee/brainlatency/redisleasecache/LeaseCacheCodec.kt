@@ -4,7 +4,7 @@ import org.springframework.data.redis.serializer.RedisSerializer
 import java.util.UUID
 
 /**
- * Owns how a [RedisLeaseCache] entry is framed as bytes: a leading tag byte marks
+ * Owns how a [LeaseCache] entry is framed as bytes: a leading tag byte marks
  * the entry as a held load lease (`T`), a cached value (`V`), or a negatively
  * cached null (`N`), and the value payload is produced by [valueSerializer]. The
  * cache orchestrates against the decoded [LeaseCacheEntry] and never touches the

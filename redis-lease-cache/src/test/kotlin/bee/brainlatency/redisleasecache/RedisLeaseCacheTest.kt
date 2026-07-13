@@ -26,7 +26,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
     val store = LeaseCacheStore(redisTemplate)
     val codec = LeaseCacheCodec(RedisSerializer.java())
-    val cache = RedisLeaseCache("test-lease", store, codec, Duration.ofSeconds(5), Duration.ofSeconds(5))
+    val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, codec, Duration.ofSeconds(5), Duration.ofSeconds(5))))
 
     afterTest {
         listOf("test-lease", "short-value").forEach { name ->
@@ -142,7 +142,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "a cached value expires after valueTtl so the next call reloads" {
-        val shortValueCache = RedisLeaseCache("short-value", store, codec, Duration.ofSeconds(5), Duration.ofMillis(300))
+        val shortValueCache = SpringRedisLeaseCache("short-value", LeaseCache(store, codec, Duration.ofSeconds(5), Duration.ofMillis(300)))
         val loads = AtomicInteger(0)
         val loader = Callable { "loaded-${loads.incrementAndGet()}" }
 
@@ -200,12 +200,15 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "a waiter gives up after waitTimeout while the lease is still held" {
-        val impatientCache = RedisLeaseCache(
-            "test-lease", store, codec,
-            leaseTtl = Duration.ofSeconds(5),
-            valueTtl = Duration.ofSeconds(5),
-            pollInterval = Duration.ofMillis(50),
-            waitTimeout = Duration.ofMillis(300),
+        val impatientCache = SpringRedisLeaseCache(
+            "test-lease",
+            LeaseCache(
+                store, codec,
+                leaseTtl = Duration.ofSeconds(5),
+                valueTtl = Duration.ofSeconds(5),
+                pollInterval = Duration.ofMillis(50),
+                waitTimeout = Duration.ofMillis(300),
+            ),
         )
         val foreignLease = codec.newLease()
         redisTemplate.opsForValue().set("test-lease::resource-18", foreignLease, Duration.ofSeconds(5))
