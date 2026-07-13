@@ -3,37 +3,25 @@ package bee.brainlatency.redisleasecache
 import org.springframework.cache.Cache
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
-import java.time.Duration
 import java.util.concurrent.Callable
-import kotlin.random.Random
 
 /**
- * A Redis-backed [Cache] that gives `@Cacheable(sync = true)` cross-instance
- * stampede protection: on a miss exactly one caller is *granted* a short-lived
- * load lease and runs the loader, while the rest poll until the value is
- * published -- or, if the lease expires because the loader died, until one of
- * them is granted and takes over. Waiting is bounded by [waitTimeout]. The
- * lease is purely an internal load lock -- it lives only for the duration of one
- * load, is released the moment the loader throws, and expires after [leaseTtl]
- * only if the loader dies without unwinding.
- *
- * This class only orchestrates the states. Byte framing lives in [LeaseCacheCodec]
- * and Redis I/O in [LeaseCacheStore], so it deals in domain terms: the granted
- * loader publishes with a compare-and-set on its lease entry -- write the value only
- * if the key still holds it -- which both releases the lease and fences the write.
- * A slow "zombie" loader whose lease already expired (and was taken over) fails the
- * CAS and cannot overwrite the newer holder's fresh entry.
+ * The Spring [Cache] contract for a [LeaseTokenCache]: a thin adapter that maps the
+ * `@Cacheable` / `@CacheEvict` surface onto the lease-token protocol and rejects every
+ * mode the protocol can't honour. All the stampede coordination -- the load lease,
+ * polling, token-fenced publish -- lives in the [delegate]; this class only decides
+ * which Spring entry points are legal and when eviction may run.
  *
  * This cache is usable only through `@Cacheable(sync = true)` -- [get] with a
- * `valueLoader`. The `sync = false` read/write path is rejected fail-fast: both the
- * plain value [get] and the tokenless [put] throw, so misapplying the cache surfaces
- * on the first call instead of silently working on hits and breaking on the first
- * miss. Typed [get] and [clear] are unsupported too.
+ * `valueLoader`, forwarded to the delegate. The `sync = false` read/write path is
+ * rejected fail-fast: both the plain value [get] and the tokenless [put] throw, so
+ * misapplying the cache surfaces on the first call instead of silently working on hits
+ * and breaking on the first miss. Typed [get] and [clear] are unsupported too.
  *
  * Eviction is likewise only supported with `@CacheEvict(beforeInvocation = false)`
  * (the default) -- evict after the method runs. `beforeInvocation = true` routes to
  * [evictIfPresent], which this cache rejects: evicting before invocation would race
- * the very load lease this cache exists to coordinate.
+ * the very load lease the delegate exists to coordinate.
  *
  * Inside a transaction, [evict] is deferred to after completion and runs unless the
  * transaction rolled back. Keying off completion status rather than `afterCommit`
@@ -42,75 +30,17 @@ import kotlin.random.Random
  * rather than potentially serving a value the database no longer holds. Only a
  * certain rollback keeps the entry, since the database is then known unchanged.
  */
-class RedisLeaseCache(
-    private val name: String,
-    private val store: LeaseCacheStore,
-    private val codec: LeaseCacheCodec,
-    private val leaseTtl: Duration,
-    private val valueTtl: Duration,
-    private val pollInterval: Duration = Duration.ofMillis(50),
-    private val waitTimeout: Duration = leaseTtl.multipliedBy(2),
-) : Cache {
+class RedisLeaseCache(private val delegate: LeaseTokenCache) : Cache {
 
-    override fun getName(): String = name
+    override fun getName(): String = delegate.name
 
-    override fun getNativeCache(): Any = store
+    override fun getNativeCache(): Any = delegate
 
-    // Single-flight load: atomically read the entry or acquire the load lease, then
-    // act on the resulting state (hit / hit-null / granted / loading). While another
-    // loader holds the lease we poll: each retry re-runs the same atomic step, so
-    // the moment the value lands we return it, and if the lease expires instead
-    // (the loader died) we are granted and take over.
-    override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? {
-        val deadline = System.nanoTime() + waitTimeout.toNanos()
-        while (true) {
-            val leaseEntry = codec.newLease()
-            val raw = store.getOrAcquire(redisKey(key), leaseEntry, leaseTtl)
-
-            when (val entry = codec.decode(raw)) {
-                is LeaseCacheEntry.Value -> {
-                    @Suppress("UNCHECKED_CAST")
-                    return entry.value as T?
-                }
-
-                is LeaseCacheEntry.Held -> {
-                    if (entry.isHeldBy(leaseEntry)) {
-                        return loadAndPublish(key, leaseEntry, valueLoader)
-                    }
-                    if (System.nanoTime() >= deadline) {
-                        throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
-                    }
-                    sleepBeforeRepoll()
-                }
-            }
-        }
-    }
-
-    // Jittered so a herd of waiters woken by the same miss doesn't re-poll in lockstep.
-    private fun sleepBeforeRepoll() {
-        val base = pollInterval.toMillis()
-        Thread.sleep(base / 2 + Random.nextLong(base + 1))
-    }
-
-    private fun <T : Any> loadAndPublish(key: Any, leaseEntry: ByteArray, valueLoader: Callable<T>): T? {
-        // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
-        // value lands only if the key still holds our lease entry, so a zombie loader
-        // whose lease expired can't clobber the holder that took over. Either way we
-        // return the loaded value to our own caller.
-        val loaded: T? = try {
-            valueLoader.call()
-        } catch (ex: Throwable) {
-            // Release the lease (CAS-del, fenced like publish) so a waiter takes over
-            // immediately instead of waiting out leaseTtl.
-            store.release(redisKey(key), leaseEntry)
-            throw Cache.ValueRetrievalException(key, valueLoader, ex)
-        }
-        store.publish(redisKey(key), leaseEntry, codec.valueEntry(loaded), valueTtl)
-        return loaded
-    }
+    // The `@Cacheable(sync = true)` path: single-flight load, handled by the delegate.
+    override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? = delegate.get(key, valueLoader)
 
     // A value may be written only by the loader that holds the lease, fencing the
-    // write on its lease entry (see [loadAndPublish]). A tokenless put has no such
+    // write on its lease entry (see [LeaseTokenCache]). A tokenless put has no such
     // proof, so allowing it would let anyone overwrite the cache and defeat the lease.
     override fun put(key: Any, value: Any?) {
         throw UnsupportedOperationException("RedisLeaseCache does not support tokenless put(); values are published only by the granted loader")
@@ -121,15 +51,14 @@ class RedisLeaseCache(
     // outcome except a certain rollback -- including commit timeout, where the
     // database may have committed (see the class doc).
     override fun evict(key: Any) {
-        val redisKey = redisKey(key)
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            store.evict(redisKey)
+            delegate.evict(key)
             return
         }
         TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
             override fun afterCompletion(status: Int) {
                 if (status != TransactionSynchronization.STATUS_ROLLED_BACK) {
-                    store.evict(redisKey)
+                    delegate.evict(key)
                 }
             }
         })
@@ -157,6 +86,4 @@ class RedisLeaseCache(
     override fun clear() {
         throw UnsupportedOperationException("RedisLeaseCache does not support clear(); evict entries individually")
     }
-
-    private fun redisKey(key: Any): String = "$name::$key"
 }
