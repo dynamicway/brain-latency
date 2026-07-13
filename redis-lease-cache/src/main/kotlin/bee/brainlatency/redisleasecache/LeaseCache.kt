@@ -17,7 +17,7 @@ import kotlin.random.Random
  *
  * This class only orchestrates the states. Both the byte framing and the Redis I/O
  * live behind [LeaseCacheStore], so it deals in domain terms: the granted loader
- * publishes with a compare-and-set on its lease entry -- write the value only if the
+ * publishes with a compare-and-set on its lease token -- write the value only if the
  * key still holds it -- which both releases the lease and fences the write. A slow
  * "zombie" loader whose lease already expired (and was taken over) fails the CAS and
  * cannot overwrite the newer holder's fresh entry.
@@ -45,17 +45,17 @@ class LeaseCache(
     fun <T : Any> get(key: String, valueLoader: Callable<T>): T? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
-            val leaseEntry = store.newLease()
+            val leaseToken = store.newLease()
 
-            when (val entry = store.getOrAcquire(key, leaseEntry, leaseTtl)) {
+            when (val entry = store.getOrAcquire(key, leaseToken, leaseTtl)) {
                 is LeaseCacheEntry.Value -> {
                     @Suppress("UNCHECKED_CAST")
                     return entry.value as T?
                 }
 
                 is LeaseCacheEntry.Held -> {
-                    if (entry.isHeldBy(leaseEntry)) {
-                        return loadAndPublish(key, leaseEntry, valueLoader)
+                    if (entry.isHeldBy(leaseToken)) {
+                        return loadAndPublish(key, leaseToken, valueLoader)
                     }
                     if (System.nanoTime() >= deadline) {
                         throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
@@ -75,9 +75,9 @@ class LeaseCache(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun <T : Any> loadAndPublish(key: String, leaseEntry: ByteArray, valueLoader: Callable<T>): T? {
+    private fun <T : Any> loadAndPublish(key: String, leaseToken: ByteArray, valueLoader: Callable<T>): T? {
         // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
-        // value lands only if the key still holds our lease entry, so a zombie loader
+        // value lands only if the key still holds our lease token, so a zombie loader
         // whose lease expired can't clobber the holder that took over. Either way we
         // return the loaded value to our own caller.
         val loaded: T? = try {
@@ -85,10 +85,10 @@ class LeaseCache(
         } catch (ex: Throwable) {
             // Release the lease (CAS-del, fenced like publish) so a waiter takes over
             // immediately instead of waiting out leaseTtl.
-            store.release(key, leaseEntry)
+            store.release(key, leaseToken)
             throw Cache.ValueRetrievalException(key, valueLoader, ex)
         }
-        store.publish(key, leaseEntry, loaded, valueTtl)
+        store.publish(key, leaseToken, loaded, valueTtl)
         return loaded
     }
 }

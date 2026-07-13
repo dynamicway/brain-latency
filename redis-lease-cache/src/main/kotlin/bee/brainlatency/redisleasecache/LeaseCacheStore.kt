@@ -2,6 +2,7 @@ package bee.brainlatency.redisleasecache
 
 import org.springframework.data.redis.core.RedisTemplate
 import java.time.Duration
+import java.util.UUID
 
 /**
  * The domain-level facade over Redis behind [LeaseCache]: runs the Lua in
@@ -16,34 +17,34 @@ class LeaseCacheStore(
     private val codec: LeaseCacheCodec,
 ) {
 
-    /** A fresh, uniquely-identified load lease to attempt acquisition with. */
-    fun newLease(): ByteArray = codec.newLease()
+    /** A fresh, uniquely-identified lease token to attempt acquisition with. */
+    fun newLease(): ByteArray = codec.leaseEntry(UUID.randomUUID().toString().toByteArray(Charsets.UTF_8))
 
-    /** Atomically return the decoded entry at [key], or write [leaseEntry] (living [leaseTtl]) and return it. */
-    fun getOrAcquire(key: String, leaseEntry: ByteArray, leaseTtl: Duration): LeaseCacheEntry {
+    /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
+    fun getOrAcquire(key: String, leaseToken: ByteArray, leaseTtl: Duration): LeaseCacheEntry {
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
-            leaseEntry,
+            leaseToken,
             leaseTtl.toArgvMillis(),
         ) ?: error("GET_OR_ACQUIRE returned null")
         return codec.decode(raw)
     }
 
-    /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseEntry]. */
-    fun publish(key: String, leaseEntry: ByteArray, value: Any?, valueTtl: Duration) {
+    /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseToken]. */
+    fun publish(key: String, leaseToken: ByteArray, value: Any?, valueTtl: Duration) {
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
-            leaseEntry,
+            leaseToken,
             codec.valueEntry(value),
             valueTtl.toArgvMillis(),
         )
     }
 
-    /** Delete [key] only if it still holds [leaseEntry], releasing an in-flight lease. */
-    fun release(key: String, leaseEntry: ByteArray) {
-        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseEntry)
+    /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
+    fun release(key: String, leaseToken: ByteArray) {
+        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseToken)
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */

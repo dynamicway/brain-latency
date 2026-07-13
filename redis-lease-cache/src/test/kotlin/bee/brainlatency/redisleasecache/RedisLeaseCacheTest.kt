@@ -181,11 +181,11 @@ class RedisLeaseCacheTest : StringSpec({
 
     "a waiter polls while another loader holds the lease and returns the published value" {
         // simulate another loader holding the load lease and publishing shortly after
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-9", foreignLease, Duration.ofSeconds(5))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-9", foreignLeaseToken, Duration.ofSeconds(5))
         Thread {
             Thread.sleep(200)
-            store.publish("test-lease::resource-9", foreignLease, "published", Duration.ofSeconds(5))
+            store.publish("test-lease::resource-9", foreignLeaseToken, "published", Duration.ofSeconds(5))
         }.start()
 
         cache.get("resource-9", Callable { "should-not-load" }) shouldBe "published"
@@ -193,8 +193,8 @@ class RedisLeaseCacheTest : StringSpec({
 
     "a waiter takes over when the holder's lease expires without a publish" {
         // a foreign lease that dies without publishing
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-17", foreignLease, Duration.ofMillis(200))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-17", foreignLeaseToken, Duration.ofMillis(200))
 
         cache.get("resource-17", Callable { "took-over" }) shouldBe "took-over"
     }
@@ -210,8 +210,8 @@ class RedisLeaseCacheTest : StringSpec({
                 waitTimeout = Duration.ofMillis(300),
             ),
         )
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-18", foreignLease, Duration.ofSeconds(5))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-18", foreignLeaseToken, Duration.ofSeconds(5))
 
         shouldThrow<IllegalStateException> {
             impatientCache.get("resource-18", Callable { "value" })
