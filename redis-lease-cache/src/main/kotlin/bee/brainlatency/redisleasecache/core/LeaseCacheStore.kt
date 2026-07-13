@@ -16,16 +16,16 @@ import java.time.Duration
 interface LeaseCacheStore {
 
     /** A fresh, uniquely-identified lease token to attempt acquisition with. */
-    fun newLease(): ByteArray
+    fun newLease(): LeaseToken
 
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
-    fun getOrAcquire(key: String, leaseToken: ByteArray, leaseTtl: Duration): LeaseCacheEntry
+    fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry
 
     /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseToken]. */
-    fun publish(key: String, leaseToken: ByteArray, value: Any?, valueTtl: Duration)
+    fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration)
 
     /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
-    fun release(key: String, leaseToken: ByteArray)
+    fun release(key: String, leaseToken: LeaseToken)
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
     fun evict(key: String): Boolean
