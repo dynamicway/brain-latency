@@ -75,7 +75,7 @@ class LeaseCache(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun <T : Any> loadAndPublish(key: String, leaseToken: ByteArray, valueLoader: Callable<T>): T? {
+    private fun <T : Any> loadAndPublish(key: String, leaseToken: LeaseToken, valueLoader: Callable<T>): T? {
         // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
         // value lands only if the key still holds our lease token, so a zombie loader
         // whose lease expired can't clobber the holder that took over. Either way we

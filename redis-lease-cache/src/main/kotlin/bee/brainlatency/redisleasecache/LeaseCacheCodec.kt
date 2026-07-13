@@ -27,7 +27,7 @@ class LeaseCacheCodec(private val valueSerializer: RedisSerializer<Any>) {
         when (raw.firstOrNull()) {
             VALUE_TAG -> LeaseCacheEntry.Value(valueSerializer.deserialize(raw.copyOfRange(1, raw.size)))
             NULL_TAG -> LeaseCacheEntry.Value(null)
-            TOKEN_TAG -> LeaseCacheEntry.Held(raw)
+            TOKEN_TAG -> LeaseCacheEntry.Held(LeaseToken(raw))
             else -> error("unrecognized cache entry tag: ${raw.firstOrNull()}")
         }
 
@@ -47,8 +47,8 @@ sealed interface LeaseCacheEntry {
     data class Value(val value: Any?) : LeaseCacheEntry
 
     /** A load lease is held by someone; who is an opaque byte-level detail. */
-    class Held(private val raw: ByteArray) : LeaseCacheEntry {
+    class Held(private val heldToken: LeaseToken) : LeaseCacheEntry {
         /** True if this held lease is the one [token] identifies (i.e. ours). */
-        fun isHeldBy(token: ByteArray): Boolean = raw.contentEquals(token)
+        fun isHeldBy(token: LeaseToken): Boolean = heldToken.matches(token)
     }
 }
