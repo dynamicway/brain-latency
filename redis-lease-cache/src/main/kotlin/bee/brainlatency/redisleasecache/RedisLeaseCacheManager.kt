@@ -1,5 +1,7 @@
 package bee.brainlatency.redisleasecache
 
+import bee.brainlatency.redisleasecache.core.LeaseCache
+import bee.brainlatency.redisleasecache.core.LeaseCacheStore
 import org.springframework.cache.Cache
 import org.springframework.cache.CacheManager
 import java.time.Duration
@@ -20,7 +22,7 @@ class RedisLeaseCacheManager(
     private val caches = ConcurrentHashMap<String, Cache>()
 
     override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { TransactionAwareEvictCache(SpringRedisLeaseCache(it, leaseCache)) }
+        caches.computeIfAbsent(name) { TransactionAwareEvictCache(it, leaseCache) }
 
     override fun getCacheNames(): Collection<String> = caches.keys
 }

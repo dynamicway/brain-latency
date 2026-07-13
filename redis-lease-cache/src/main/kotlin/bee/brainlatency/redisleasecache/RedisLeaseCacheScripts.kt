@@ -3,8 +3,8 @@ package bee.brainlatency.redisleasecache
 import org.springframework.data.redis.core.script.DefaultRedisScript
 
 /**
- * The atomic Redis-side operations behind [LeaseCache], kept in one place so
- * the cache orchestration and the Lua live apart. Both are binary-safe: KEYS/ARGV
+ * The atomic Redis-side operations behind [RedisTemplateLeaseCacheStore], kept in one
+ * place so the store adapter and the Lua live apart. Both are binary-safe: KEYS/ARGV
  * are byte strings, so the framed entries pass through unchanged.
  */
 object RedisLeaseCacheScripts {

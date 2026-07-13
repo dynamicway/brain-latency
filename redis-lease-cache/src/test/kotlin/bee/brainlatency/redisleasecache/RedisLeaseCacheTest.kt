@@ -1,5 +1,7 @@
 package bee.brainlatency.redisleasecache
 
+import bee.brainlatency.redisleasecache.core.LeaseCache
+import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
@@ -24,9 +26,9 @@ class RedisLeaseCacheTest : StringSpec({
         valueSerializer = RedisSerializer.byteArray()
         afterPropertiesSet()
     }
-    val codec = LeaseCacheCodec(RedisSerializer.java())
-    val store = LeaseCacheStore(redisTemplate, codec)
-    val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, Duration.ofSeconds(5), Duration.ofSeconds(5))))
+    val codec = LeaseCacheCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java()))
+    val store = RedisTemplateLeaseCacheStore(redisTemplate, codec)
+    val cache = TransactionAwareEvictCache("test-lease", LeaseCache(store, Duration.ofSeconds(5), Duration.ofSeconds(5)))
 
     afterTest {
         listOf("test-lease", "short-value").forEach { name ->
@@ -142,7 +144,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "a cached value expires after valueTtl so the next call reloads" {
-        val shortValueCache = SpringRedisLeaseCache("short-value", LeaseCache(store, Duration.ofSeconds(5), Duration.ofMillis(300)))
+        val shortValueCache = TransactionAwareEvictCache("short-value", LeaseCache(store, Duration.ofSeconds(5), Duration.ofMillis(300)))
         val loads = AtomicInteger(0)
         val loader = Callable { "loaded-${loads.incrementAndGet()}" }
 
@@ -200,7 +202,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "a waiter gives up after waitTimeout while the lease is still held" {
-        val impatientCache = SpringRedisLeaseCache(
+        val impatientCache = TransactionAwareEvictCache(
             "test-lease",
             LeaseCache(
                 store,

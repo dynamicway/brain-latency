@@ -1,18 +1,17 @@
-package bee.brainlatency.redisleasecache
-
-import org.springframework.data.redis.serializer.RedisSerializer
+package bee.brainlatency.redisleasecache.core
 
 /**
  * Owns how a [LeaseCache] entry is framed as bytes: a leading tag byte marks
  * the entry as a held load lease (`T`), a cached value (`V`), or a negatively
- * cached null (`N`), and the value payload is produced by [valueSerializer]. The
- * cache orchestrates against the decoded [LeaseCacheEntry] and never touches the
- * byte layout, so the framing (or serializer, or compression) can change here alone.
+ * cached null (`N`), and the value payload is produced by the [valueSerializer]
+ * strategy. The cache orchestrates against the decoded [LeaseCacheEntry] and never
+ * touches the byte layout, so the framing (or serializer, or compression) can change
+ * here alone.
  *
  * Framing only: it wraps a lease token that already exists rather than generating
  * one -- minting the token itself is [LeaseCacheStore.newLease]'s job.
  */
-class LeaseCacheCodec(private val valueSerializer: RedisSerializer<Any>) {
+class LeaseCacheCodec(private val valueSerializer: LeaseCacheValueSerializer) {
 
     /** Frames [token] as a held load-lease entry. */
     fun leaseEntry(token: ByteArray): ByteArray = frame(TOKEN_TAG, token)
@@ -20,7 +19,7 @@ class LeaseCacheCodec(private val valueSerializer: RedisSerializer<Any>) {
     /** Frames a loaded value, or a null as a negative-cache marker, for storage. */
     fun valueEntry(value: Any?): ByteArray =
         if (value == null) frame(NULL_TAG)
-        else frame(VALUE_TAG, valueSerializer.serialize(value) ?: ByteArray(0))
+        else frame(VALUE_TAG, valueSerializer.serialize(value))
 
     /** Interprets a raw stored entry. */
     fun decode(raw: ByteArray): LeaseCacheEntry =
