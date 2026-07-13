@@ -21,6 +21,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 class TransactionAwareEvictCache(private val delegate: Cache) : Cache by delegate {
 
+    // Kotlin's interface delegation forwards only abstract members; a Java default
+    // method like evictIfPresent falls through to Spring's default body (evict + return
+    // false), silently bypassing whatever the delegate decided for it -- for
+    // SpringRedisLeaseCache, its fail-fast rejection. Forward it explicitly.
+    override fun evictIfPresent(key: Any): Boolean = delegate.evictIfPresent(key)
+
     override fun evict(key: Any) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             delegate.evict(key)
