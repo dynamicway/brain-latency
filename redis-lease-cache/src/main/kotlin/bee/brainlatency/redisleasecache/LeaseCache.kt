@@ -15,8 +15,8 @@ import kotlin.random.Random
  * released the moment the loader throws, and expires after [leaseTtl] only if the
  * loader dies without unwinding.
  *
- * This class only orchestrates the states. Byte framing lives in [LeaseCacheCodec] and
- * Redis I/O in [LeaseCacheStore], so it deals in domain terms: the granted loader
+ * This class only orchestrates the states. Both the byte framing and the Redis I/O
+ * live behind [LeaseCacheStore], so it deals in domain terms: the granted loader
  * publishes with a compare-and-set on its lease entry -- write the value only if the
  * key still holds it -- which both releases the lease and fences the write. A slow
  * "zombie" loader whose lease already expired (and was taken over) fails the CAS and
@@ -31,7 +31,6 @@ import kotlin.random.Random
  */
 class LeaseCache(
     private val store: LeaseCacheStore,
-    private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
     private val valueTtl: Duration,
     private val pollInterval: Duration = Duration.ofMillis(50),
@@ -46,10 +45,9 @@ class LeaseCache(
     fun <T : Any> get(key: String, valueLoader: Callable<T>): T? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
-            val leaseEntry = codec.newLease()
-            val raw = store.getOrAcquire(key, leaseEntry, leaseTtl)
+            val leaseEntry = store.newLease()
 
-            when (val entry = codec.decode(raw)) {
+            when (val entry = store.getOrAcquire(key, leaseEntry, leaseTtl)) {
                 is LeaseCacheEntry.Value -> {
                     @Suppress("UNCHECKED_CAST")
                     return entry.value as T?
@@ -90,7 +88,7 @@ class LeaseCache(
             store.release(key, leaseEntry)
             throw Cache.ValueRetrievalException(key, valueLoader, ex)
         }
-        store.publish(key, leaseEntry, codec.valueEntry(loaded), valueTtl)
+        store.publish(key, leaseEntry, loaded, valueTtl)
         return loaded
     }
 }
