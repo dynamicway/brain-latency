@@ -49,6 +49,6 @@ sealed interface LeaseCacheEntry {
     /** A load lease is held by someone; who is an opaque byte-level detail. */
     class Held(private val raw: ByteArray) : LeaseCacheEntry {
         /** True if this held lease is the one [token] identifies (i.e. ours). */
-        fun isHeldBy(token: ByteArray): Boolean = raw.contentEquals(token)
+        fun isHeldBy(token: LeaseToken): Boolean = raw.contentEquals(token.bytes)
     }
 }
