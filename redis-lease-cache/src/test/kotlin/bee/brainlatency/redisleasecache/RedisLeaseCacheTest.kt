@@ -28,7 +28,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
     val codec = LeaseCacheCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java()))
     val store = RedisTemplateLeaseCacheStore(redisTemplate, codec)
-    val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, Duration.ofSeconds(5), Duration.ofSeconds(5))))
+    val cache = SpringRedisLeaseCache("test-lease", LeaseCache(store, Duration.ofSeconds(5), Duration.ofSeconds(5)))
 
     afterTest {
         listOf("test-lease", "short-value").forEach { name ->

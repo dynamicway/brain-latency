@@ -22,7 +22,7 @@ class RedisLeaseCacheManager(
     private val caches = ConcurrentHashMap<String, Cache>()
 
     override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { TransactionAwareEvictCache(SpringRedisLeaseCache(it, leaseCache)) }
+        caches.computeIfAbsent(name) { SpringRedisLeaseCache(it, leaseCache) }
 
     override fun getCacheNames(): Collection<String> = caches.keys
 }
