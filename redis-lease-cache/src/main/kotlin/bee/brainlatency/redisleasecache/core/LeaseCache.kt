@@ -13,14 +13,14 @@ import kotlin.random.Random
  * moment the loader throws, and expires after [leaseTtl] only if the loader dies
  * without unwinding.
  *
- * This class only orchestrates the states; everything environment-specific comes in as
- * a strategy. Byte framing lives in [LeaseCacheCodec] (value serialization behind its
- * [LeaseCacheValueSerializer]) and storage I/O behind the [LeaseCacheStore] port, so it
- * deals in domain terms: the granted loader publishes with a compare-and-set on its
- * lease entry -- write the value only if the key still holds it -- which both releases
- * the lease and fences the write. A slow "zombie" loader whose lease already expired
- * (and was taken over) fails the CAS and cannot overwrite the newer holder's fresh
- * entry.
+ * This class only orchestrates the states; everything environment-specific lives
+ * behind the [LeaseCacheStore] port -- minting a lease token, byte framing (via a
+ * [LeaseCacheCodec] and its [LeaseCacheValueSerializer] strategy), and the storage I/O
+ * are all the concrete store's concern. This class deals only in domain terms: the
+ * granted loader publishes with a compare-and-set on its lease token -- write the
+ * value only if the key still holds it -- which both releases the lease and fences the
+ * write. A slow "zombie" loader whose lease already expired (and was taken over) fails
+ * the CAS and cannot overwrite the newer holder's fresh entry.
  *
  * It is name-agnostic and stateless beyond its config, so a single instance backs every
  * named cache: an adapter (e.g. the Spring-facing `SpringRedisLeaseCache`) owns the
@@ -31,7 +31,6 @@ import kotlin.random.Random
  */
 class LeaseCache(
     private val store: LeaseCacheStore,
-    private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
     private val valueTtl: Duration,
     private val pollInterval: Duration = Duration.ofMillis(50),
@@ -46,18 +45,17 @@ class LeaseCache(
     fun <T : Any> get(key: String, valueLoader: () -> T?): T? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
-            val leaseEntry = codec.newLease()
-            val raw = store.getOrAcquire(key, leaseEntry, leaseTtl)
+            val leaseToken = store.newLease()
 
-            when (val entry = codec.decode(raw)) {
+            when (val entry = store.getOrAcquire(key, leaseToken, leaseTtl)) {
                 is LeaseCacheEntry.Value -> {
                     @Suppress("UNCHECKED_CAST")
                     return entry.value as T?
                 }
 
                 is LeaseCacheEntry.Held -> {
-                    if (entry.isHeldBy(leaseEntry)) {
-                        return loadAndPublish(key, leaseEntry, valueLoader)
+                    if (entry.isHeldBy(leaseToken)) {
+                        return loadAndPublish(key, leaseToken, valueLoader)
                     }
                     if (System.nanoTime() >= deadline) {
                         throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
@@ -77,9 +75,9 @@ class LeaseCache(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun <T : Any> loadAndPublish(key: String, leaseEntry: ByteArray, valueLoader: () -> T?): T? {
+    private fun <T : Any> loadAndPublish(key: String, leaseToken: ByteArray, valueLoader: () -> T?): T? {
         // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
-        // value lands only if the key still holds our lease entry, so a zombie loader
+        // value lands only if the key still holds our lease token, so a zombie loader
         // whose lease expired can't clobber the holder that took over. Either way we
         // return the loaded value to our own caller.
         val loaded: T? = try {
@@ -87,10 +85,10 @@ class LeaseCache(
         } catch (ex: Throwable) {
             // Release the lease (CAS-del, fenced like publish) so a waiter takes over
             // immediately instead of waiting out leaseTtl.
-            store.release(key, leaseEntry)
+            store.release(key, leaseToken)
             throw LeaseCacheLoadException(key, ex)
         }
-        store.publish(key, leaseEntry, codec.valueEntry(loaded), valueTtl)
+        store.publish(key, leaseToken, loaded, valueTtl)
         return loaded
     }
 }

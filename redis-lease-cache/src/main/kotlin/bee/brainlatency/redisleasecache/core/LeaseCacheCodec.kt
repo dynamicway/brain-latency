@@ -1,7 +1,5 @@
 package bee.brainlatency.redisleasecache.core
 
-import java.util.UUID
-
 /**
  * Owns how a [LeaseCache] entry is framed as bytes: a leading tag byte marks
  * the entry as a held load lease (`T`), a cached value (`V`), or a negatively
@@ -9,12 +7,14 @@ import java.util.UUID
  * strategy. The cache orchestrates against the decoded [LeaseCacheEntry] and never
  * touches the byte layout, so the framing (or serializer, or compression) can change
  * here alone.
+ *
+ * Framing only: it wraps a lease token that already exists rather than generating
+ * one -- minting the token itself is [LeaseCacheStore.newLease]'s job.
  */
 class LeaseCacheCodec(private val valueSerializer: LeaseCacheValueSerializer) {
 
-    /** A fresh, uniquely-identified load-lease entry to attempt acquisition with. */
-    fun newLease(): ByteArray =
-        frame(TOKEN_TAG, UUID.randomUUID().toString().toByteArray(Charsets.UTF_8))
+    /** Frames [token] as a held load-lease entry. */
+    fun leaseEntry(token: ByteArray): ByteArray = frame(TOKEN_TAG, token)
 
     /** Frames a loaded value, or a null as a negative-cache marker, for storage. */
     fun valueEntry(value: Any?): ByteArray =
@@ -47,7 +47,7 @@ sealed interface LeaseCacheEntry {
 
     /** A load lease is held by someone; who is an opaque byte-level detail. */
     class Held(private val raw: ByteArray) : LeaseCacheEntry {
-        /** True if this held lease is the one [lease] identifies (i.e. ours). */
-        fun isHeldBy(lease: ByteArray): Boolean = raw.contentEquals(lease)
+        /** True if this held lease is the one [token] identifies (i.e. ours). */
+        fun isHeldBy(token: ByteArray): Boolean = raw.contentEquals(token)
     }
 }
