@@ -7,13 +7,13 @@ import kotlin.random.Random
 
 /**
  * The lease-token cache proper: the cross-instance stampede protection that
- * [RedisLeaseCache] exposes to Spring. On a miss exactly one caller is *granted* a
- * short-lived load lease and runs the loader, while the rest poll until the value is
- * published -- or, if the lease expires because the loader died, until one of them is
- * granted and takes over. Waiting is bounded by [waitTimeout]. The lease is purely an
- * internal load lock -- it lives only for the duration of one load, is released the
- * moment the loader throws, and expires after [leaseTtl] only if the loader dies
- * without unwinding.
+ * [SpringRedisLeaseTokenCache] exposes to Spring. On a miss exactly one caller is
+ * *granted* a short-lived load lease and runs the loader, while the rest poll until
+ * the value is published -- or, if the lease expires because the loader died, until one
+ * of them is granted and takes over. Waiting is bounded by [waitTimeout]. The lease is
+ * purely an internal load lock -- it lives only for the duration of one load, is
+ * released the moment the loader throws, and expires after [leaseTtl] only if the
+ * loader dies without unwinding.
  *
  * This class only orchestrates the states. Byte framing lives in [LeaseCacheCodec] and
  * Redis I/O in [LeaseCacheStore], so it deals in domain terms: the granted loader
@@ -22,13 +22,14 @@ import kotlin.random.Random
  * "zombie" loader whose lease already expired (and was taken over) fails the CAS and
  * cannot overwrite the newer holder's fresh entry.
  *
- * It knows nothing of Spring's [Cache] contract -- the loader-less read/write path, the
- * eviction modes, transaction-deferred eviction. Those concerns live in the
- * [RedisLeaseCache] adapter; here we expose only the two operations the lease protocol
- * actually has: a single-flight [get] with a loader, and an immediate [evict].
+ * It is name-agnostic and stateless beyond its config, so a single instance backs every
+ * named cache: the [SpringRedisLeaseTokenCache] adapter owns the cache name and hands
+ * down already-namespaced Redis keys. It knows nothing of Spring's [Cache] contract --
+ * the loader-less read/write path, the eviction modes, transaction-deferred eviction --
+ * exposing only the two operations the lease protocol actually has: a single-flight
+ * [get] with a loader, and an immediate [evict].
  */
 class LeaseTokenCache(
-    val name: String,
     private val store: LeaseCacheStore,
     private val codec: LeaseCacheCodec,
     private val leaseTtl: Duration,
@@ -42,11 +43,11 @@ class LeaseTokenCache(
     // loader holds the lease we poll: each retry re-runs the same atomic step, so
     // the moment the value lands we return it, and if the lease expires instead
     // (the loader died) we are granted and take over.
-    fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? {
+    fun <T : Any> get(key: String, valueLoader: Callable<T>): T? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
             val leaseEntry = codec.newLease()
-            val raw = store.getOrAcquire(redisKey(key), leaseEntry, leaseTtl)
+            val raw = store.getOrAcquire(key, leaseEntry, leaseTtl)
 
             when (val entry = codec.decode(raw)) {
                 is LeaseCacheEntry.Value -> {
@@ -68,7 +69,7 @@ class LeaseTokenCache(
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
-    fun evict(key: Any): Boolean = store.evict(redisKey(key))
+    fun evict(key: String): Boolean = store.evict(key)
 
     // Jittered so a herd of waiters woken by the same miss doesn't re-poll in lockstep.
     private fun sleepBeforeRepoll() {
@@ -76,7 +77,7 @@ class LeaseTokenCache(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun <T : Any> loadAndPublish(key: Any, leaseEntry: ByteArray, valueLoader: Callable<T>): T? {
+    private fun <T : Any> loadAndPublish(key: String, leaseEntry: ByteArray, valueLoader: Callable<T>): T? {
         // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
         // value lands only if the key still holds our lease entry, so a zombie loader
         // whose lease expired can't clobber the holder that took over. Either way we
@@ -86,12 +87,10 @@ class LeaseTokenCache(
         } catch (ex: Throwable) {
             // Release the lease (CAS-del, fenced like publish) so a waiter takes over
             // immediately instead of waiting out leaseTtl.
-            store.release(redisKey(key), leaseEntry)
+            store.release(key, leaseEntry)
             throw Cache.ValueRetrievalException(key, valueLoader, ex)
         }
-        store.publish(redisKey(key), leaseEntry, codec.valueEntry(loaded), valueTtl)
+        store.publish(key, leaseEntry, codec.valueEntry(loaded), valueTtl)
         return loaded
     }
-
-    private fun redisKey(key: Any): String = "$name::$key"
 }

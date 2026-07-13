@@ -4,7 +4,7 @@ import org.springframework.data.redis.core.RedisTemplate
 import java.time.Duration
 
 /**
- * The Redis I/O behind [RedisLeaseCache]: runs the Lua in [RedisLeaseCacheScripts]
+ * The Redis I/O behind [LeaseTokenCache]: runs the Lua in [RedisLeaseCacheScripts]
  * and marshals the arguments (keys, framed entries, TTLs as millis bytes), so the
  * cache deals in domain terms -- an entry, a lease, a TTL -- and never touches
  * KEYS/ARGV ordering or byte-encoded durations.
