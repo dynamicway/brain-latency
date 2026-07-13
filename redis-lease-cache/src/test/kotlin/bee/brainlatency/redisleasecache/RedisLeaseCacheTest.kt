@@ -24,9 +24,9 @@ class RedisLeaseCacheTest : StringSpec({
         valueSerializer = RedisSerializer.byteArray()
         afterPropertiesSet()
     }
-    val store = LeaseCacheStore(redisTemplate)
     val codec = LeaseCacheCodec(RedisSerializer.java())
-    val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, codec, Duration.ofSeconds(5), Duration.ofSeconds(5))))
+    val store = LeaseCacheStore(redisTemplate, codec)
+    val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, Duration.ofSeconds(5), Duration.ofSeconds(5))))
 
     afterTest {
         listOf("test-lease", "short-value").forEach { name ->
@@ -142,7 +142,7 @@ class RedisLeaseCacheTest : StringSpec({
     }
 
     "a cached value expires after valueTtl so the next call reloads" {
-        val shortValueCache = SpringRedisLeaseCache("short-value", LeaseCache(store, codec, Duration.ofSeconds(5), Duration.ofMillis(300)))
+        val shortValueCache = SpringRedisLeaseCache("short-value", LeaseCache(store, Duration.ofSeconds(5), Duration.ofMillis(300)))
         val loads = AtomicInteger(0)
         val loader = Callable { "loaded-${loads.incrementAndGet()}" }
 
@@ -181,11 +181,11 @@ class RedisLeaseCacheTest : StringSpec({
 
     "a waiter polls while another loader holds the lease and returns the published value" {
         // simulate another loader holding the load lease and publishing shortly after
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-9", foreignLease, Duration.ofSeconds(5))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-9", foreignLeaseToken, Duration.ofSeconds(5))
         Thread {
             Thread.sleep(200)
-            store.publish("test-lease::resource-9", foreignLease, codec.valueEntry("published"), Duration.ofSeconds(5))
+            store.publish("test-lease::resource-9", foreignLeaseToken, "published", Duration.ofSeconds(5))
         }.start()
 
         cache.get("resource-9", Callable { "should-not-load" }) shouldBe "published"
@@ -193,8 +193,8 @@ class RedisLeaseCacheTest : StringSpec({
 
     "a waiter takes over when the holder's lease expires without a publish" {
         // a foreign lease that dies without publishing
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-17", foreignLease, Duration.ofMillis(200))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-17", foreignLeaseToken, Duration.ofMillis(200))
 
         cache.get("resource-17", Callable { "took-over" }) shouldBe "took-over"
     }
@@ -203,15 +203,15 @@ class RedisLeaseCacheTest : StringSpec({
         val impatientCache = SpringRedisLeaseCache(
             "test-lease",
             LeaseCache(
-                store, codec,
+                store,
                 leaseTtl = Duration.ofSeconds(5),
                 valueTtl = Duration.ofSeconds(5),
                 pollInterval = Duration.ofMillis(50),
                 waitTimeout = Duration.ofMillis(300),
             ),
         )
-        val foreignLease = codec.newLease()
-        redisTemplate.opsForValue().set("test-lease::resource-18", foreignLease, Duration.ofSeconds(5))
+        val foreignLeaseToken = store.newLease()
+        redisTemplate.opsForValue().set("test-lease::resource-18", foreignLeaseToken, Duration.ofSeconds(5))
 
         shouldThrow<IllegalStateException> {
             impatientCache.get("resource-18", Callable { "value" })
