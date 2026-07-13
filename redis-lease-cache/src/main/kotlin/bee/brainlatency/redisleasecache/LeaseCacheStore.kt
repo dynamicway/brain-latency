@@ -10,7 +10,8 @@ import java.util.UUID
  * arguments (keys, TTLs as millis bytes) *and* the byte framing (leases, values, the
  * null marker). The cache above deals only in domain terms -- mint a lease, get-or-
  * acquire an entry, publish a value, release, evict -- and never touches KEYS/ARGV
- * ordering, byte-encoded durations, or the entry framing.
+ * ordering, byte-encoded durations, entry framing, or raw lease bytes: [LeaseToken]
+ * unwraps to [ByteArray] only right here, at the Redis I/O boundary.
  */
 class LeaseCacheStore(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
@@ -18,33 +19,34 @@ class LeaseCacheStore(
 ) {
 
     /** A fresh, uniquely-identified lease token to attempt acquisition with. */
-    fun newLease(): ByteArray = codec.leaseEntry(UUID.randomUUID().toString().toByteArray(Charsets.UTF_8))
+    fun newLease(): LeaseToken =
+        LeaseToken(codec.leaseEntry(UUID.randomUUID().toString().toByteArray(Charsets.UTF_8)))
 
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
-    fun getOrAcquire(key: String, leaseToken: ByteArray, leaseTtl: Duration): LeaseCacheEntry {
+    fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry {
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
-            leaseToken,
+            leaseToken.toBytes(),
             leaseTtl.toArgvMillis(),
         ) ?: error("GET_OR_ACQUIRE returned null")
         return codec.decode(raw)
     }
 
     /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseToken]. */
-    fun publish(key: String, leaseToken: ByteArray, value: Any?, valueTtl: Duration) {
+    fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration) {
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
-            leaseToken,
+            leaseToken.toBytes(),
             codec.valueEntry(value),
             valueTtl.toArgvMillis(),
         )
     }
 
     /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
-    fun release(key: String, leaseToken: ByteArray) {
-        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseToken)
+    fun release(key: String, leaseToken: LeaseToken) {
+        redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), leaseToken.toBytes())
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
