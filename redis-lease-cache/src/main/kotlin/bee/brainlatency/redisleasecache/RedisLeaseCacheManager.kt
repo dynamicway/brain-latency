@@ -18,10 +18,10 @@ class RedisLeaseCacheManager(
     // namespace the keys they hand it.
     private val leaseCache = LeaseCache(store, codec, leaseTtl, valueTtl, pollInterval, waitTimeout)
 
-    private val caches = ConcurrentHashMap<String, SpringRedisLeaseCache>()
+    private val caches = ConcurrentHashMap<String, Cache>()
 
     override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { SpringRedisLeaseCache(it, leaseCache) }
+        caches.computeIfAbsent(name) { TransactionAwareEvictCache(SpringRedisLeaseCache(it, leaseCache)) }
 
     override fun getCacheNames(): Collection<String> = caches.keys
 }

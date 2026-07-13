@@ -1,8 +1,6 @@
 package bee.brainlatency.redisleasecache
 
 import org.springframework.cache.Cache
-import org.springframework.transaction.support.TransactionSynchronization
-import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.concurrent.Callable
 
 /**
@@ -10,9 +8,9 @@ import java.util.concurrent.Callable
  * `@Cacheable` / `@CacheEvict` surface onto the lease-token protocol and rejects every
  * mode the protocol can't honour. All the stampede coordination -- the load lease,
  * polling, token-fenced publish -- lives in the [delegate]; this class only owns the
- * cache [name] (namespacing every key as `name::key`), decides which Spring entry
- * points are legal, and defers eviction to transaction completion. One [delegate] is
- * shared across all named caches, since the name lives here rather than in the engine.
+ * cache [name] (namespacing every key as `name::key`) and decides which Spring entry
+ * points are legal. One [delegate] is shared across all named caches, since the name
+ * lives here rather than in the engine.
  *
  * This cache is usable only through `@Cacheable(sync = true)` -- [get] with a
  * `valueLoader`, forwarded to the delegate. The `sync = false` read/write path is
@@ -25,12 +23,9 @@ import java.util.concurrent.Callable
  * [evictIfPresent], which this cache rejects: evicting before invocation would race
  * the very load lease the delegate exists to coordinate.
  *
- * Inside a transaction, [evict] is deferred to after completion and runs unless the
- * transaction rolled back. Keying off completion status rather than `afterCommit`
- * covers the commit-timeout case: the outcome is then *unknown* -- the database may
- * well have committed -- so the entry is evicted anyway and the next read reloads,
- * rather than potentially serving a value the database no longer holds. Only a
- * certain rollback keeps the entry, since the database is then known unchanged.
+ * [evict] here runs immediately -- transaction-deferred eviction is a separate concern,
+ * layered on top by wrapping this cache in [TransactionAwareEvictCache] (as
+ * [RedisLeaseCacheManager] does).
  */
 class SpringRedisLeaseCache(
     private val name: String,
@@ -51,23 +46,8 @@ class SpringRedisLeaseCache(
         throw UnsupportedOperationException("SpringRedisLeaseCache does not support tokenless put(); values are published only by the granted loader")
     }
 
-    // Deferred inside a transaction: the entry must outlive the transaction so
-    // concurrent readers keep hitting the still-valid value, and must go on every
-    // outcome except a certain rollback -- including commit timeout, where the
-    // database may have committed (see the class doc).
     override fun evict(key: Any) {
-        val redisKey = redisKey(key)
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            delegate.evict(redisKey)
-            return
-        }
-        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
-            override fun afterCompletion(status: Int) {
-                if (status != TransactionSynchronization.STATUS_ROLLED_BACK) {
-                    delegate.evict(redisKey)
-                }
-            }
-        })
+        delegate.evict(redisKey(key))
     }
 
     // evictIfPresent backs @CacheEvict(beforeInvocation = true) -- evict before the
