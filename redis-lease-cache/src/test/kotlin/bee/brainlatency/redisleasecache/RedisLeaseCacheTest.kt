@@ -1,5 +1,7 @@
 package bee.brainlatency.redisleasecache
 
+import bee.brainlatency.redisleasecache.core.LeaseCache
+import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
@@ -24,8 +26,8 @@ class RedisLeaseCacheTest : StringSpec({
         valueSerializer = RedisSerializer.byteArray()
         afterPropertiesSet()
     }
-    val store = LeaseCacheStore(redisTemplate)
-    val codec = LeaseCacheCodec(RedisSerializer.java())
+    val store = RedisTemplateLeaseCacheStore(redisTemplate)
+    val codec = LeaseCacheCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java()))
     val cache = TransactionAwareEvictCache(SpringRedisLeaseCache("test-lease", LeaseCache(store, codec, Duration.ofSeconds(5), Duration.ofSeconds(5))))
 
     afterTest {

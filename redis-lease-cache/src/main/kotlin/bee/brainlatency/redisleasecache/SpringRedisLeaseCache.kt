@@ -1,5 +1,7 @@
 package bee.brainlatency.redisleasecache
 
+import bee.brainlatency.redisleasecache.core.LeaseCache
+import bee.brainlatency.redisleasecache.core.LeaseCacheLoadException
 import org.springframework.cache.Cache
 import java.util.concurrent.Callable
 
@@ -37,7 +39,14 @@ class SpringRedisLeaseCache(
     override fun getNativeCache(): Any = delegate
 
     // The `@Cacheable(sync = true)` path: single-flight load, handled by the delegate.
-    override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? = delegate.get(redisKey(key), valueLoader)
+    // A loader failure comes back as the core's LeaseCacheLoadException and is mapped
+    // onto the exception Spring's contract prescribes for get(key, valueLoader).
+    override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? =
+        try {
+            delegate.get(redisKey(key)) { valueLoader.call() }
+        } catch (ex: LeaseCacheLoadException) {
+            throw Cache.ValueRetrievalException(key, valueLoader, ex.cause)
+        }
 
     // A value may be written only by the loader that holds the lease, fencing the
     // write on its lease entry (see [LeaseCache]). A tokenless put has no such
