@@ -13,8 +13,11 @@ import java.util.concurrent.Callable
  * mode the protocol can't honour. All the stampede coordination -- the load lease,
  * polling, token-fenced publish -- lives in the [delegate]; this class only owns the
  * cache [name] (namespacing every key as `name::key`) and decides which Spring entry
- * points are legal. One [delegate] is shared across all named caches, since the name
- * lives here rather than in the engine.
+ * points are legal. The name lives here rather than in the engine, so one [delegate] can
+ * back every named cache -- as `RedisLeaseCacheManager` does at `LeaseCache<Any>` -- or a
+ * factory can hand each name its own typed `LeaseCache<V>`. Either way this adapter is
+ * the untyped Spring edge: the engine is driven at its own [V] and the `Object` values of
+ * Spring's `Cache` contract are cast across the boundary here.
  *
  * This cache is usable only through `@Cacheable(sync = true)` -- [get] with a
  * `valueLoader`, forwarded to the delegate. The `sync = false` read/write path is
@@ -39,9 +42,9 @@ import java.util.concurrent.Callable
  * evicts on an unknown completion status, for the reason above. Outside a transaction,
  * eviction runs immediately.
  */
-class TransactionAwareEvictCache(
+class TransactionAwareEvictCache<V : Any>(
     private val name: String,
-    private val delegate: LeaseCache<Any>,
+    private val delegate: LeaseCache<V>,
 ) : Cache {
 
     override fun getName(): String = name
@@ -52,14 +55,19 @@ class TransactionAwareEvictCache(
     // A loader failure comes back as the core's LeaseCacheLoadException and is mapped
     // onto the exception Spring's contract prescribes for get(key, valueLoader).
     //
-    // This is the Object boundary: Spring's Cache contract is untyped, so the engine is
-    // driven at LeaseCache<Any> and the result is cast back to the caller's T. That
-    // unchecked cast is inherent to Spring's `<T> T get(..)` signature and lives here,
-    // at the edge -- not in the typed core.
+    // This is the Object boundary: Spring's Cache contract is untyped, so the caller's T
+    // and the engine's V are bridged by two unchecked casts here -- the loader's result
+    // into V on the way in, the stored value back into T on the way out. Both are
+    // inherent to Spring's `<T> T get(..)` signature and live at this edge, not in the
+    // typed core. They are safe when T == V (no projection); a cache that stores a
+    // projection of the loaded type would map here instead of casting.
     override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? =
         try {
             @Suppress("UNCHECKED_CAST")
-            delegate.get(redisKey(key)) { valueLoader.call() } as T?
+            delegate.get(redisKey(key)) {
+                @Suppress("UNCHECKED_CAST")
+                valueLoader.call() as V?
+            } as T?
         } catch (ex: LeaseCacheLoadException) {
             throw Cache.ValueRetrievalException(key, valueLoader, ex.cause)
         }
