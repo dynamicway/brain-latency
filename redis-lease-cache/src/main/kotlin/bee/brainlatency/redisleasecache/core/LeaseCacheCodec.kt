@@ -38,15 +38,3 @@ class LeaseCacheCodec<V : Any>(private val serializer: LeaseCacheSerializer<V>) 
         const val NULL_TAG = 'N'.code.toByte()
     }
 }
-
-/** A decoded cache entry: either a stored value of type [V] or a held load lease. */
-sealed interface LeaseCacheEntry<out V> {
-    /** A cached value, or `null` for a negatively cached miss. */
-    data class Value<out V>(val value: V?) : LeaseCacheEntry<V>
-
-    /** A load lease is held by someone; who is an opaque byte-level detail. */
-    class Held(private val heldToken: LeaseToken) : LeaseCacheEntry<Nothing> {
-        /** True if this held lease is the one [token] identifies (i.e. ours). */
-        fun isHeldBy(token: LeaseToken): Boolean = heldToken.matches(token)
-    }
-}
