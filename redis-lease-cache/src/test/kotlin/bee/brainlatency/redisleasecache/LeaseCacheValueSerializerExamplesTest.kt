@@ -2,9 +2,12 @@ package bee.brainlatency.redisleasecache
 
 import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer
+import org.springframework.data.redis.serializer.StringRedisSerializer
+import java.io.IOException
 
 /**
  * Worked examples of plugging different value-serialization strategies into the
@@ -69,5 +72,42 @@ class LeaseCacheValueSerializerExamplesTest : StringSpec({
         gzipped[1] shouldBe 0x8B.toByte()
         val corrupted = String(gzipped, Charsets.UTF_8).toByteArray(Charsets.UTF_8)
         (corrupted.contentEquals(gzipped)) shouldBe false
+    }
+
+    // The value serializer Spring wires when a RedisTemplate's *value* channel is String
+    // (RedisTemplate<String, String>): serialize = String.getBytes(UTF-8),
+    // deserialize = new String(bytes, UTF-8). Pushing a framed entry through it models
+    // exactly what a String value channel would do to those bytes on the wire.
+    val stringChannel = StringRedisSerializer()
+    fun throughStringChannel(bytes: ByteArray): ByteArray = stringChannel.serialize(stringChannel.deserialize(bytes))
+
+    "example 3 -- a String value channel CORRUPTS the gzip(binary) entry so decode fails" {
+        val json = RedisSerializerLeaseCacheValueSerializer(GenericJacksonJsonRedisSerializer.builder().build())
+        val codec = LeaseCacheCodec(GzipLeaseCacheValueSerializer(json))
+        val entry = codec.valueEntry(record)
+
+        // The raw-ByteArray channel (what the store actually uses) hands the bytes back
+        // untouched, so decode succeeds.
+        (codec.decode(entry) as LeaseCacheEntry.Value).value shouldBe record
+
+        // A String channel re-encodes the same entry through UTF-8. The gzip payload holds
+        // bytes that are not valid UTF-8, so they come back changed...
+        val mangled = throughStringChannel(entry)
+        mangled.contentEquals(entry) shouldBe false
+        // ...and the corrupted gzip header can no longer be inflated: decode blows up.
+        shouldThrow<IOException> { codec.decode(mangled) }
+    }
+
+    "example 4 -- a String value channel leaves the JSON(text) entry intact" {
+        // Contrast: JSON is valid UTF-8, so the very same String round-trip is lossless
+        // and the entry still decodes. A String value channel only breaks on binary.
+        val codec = LeaseCacheCodec(
+            RedisSerializerLeaseCacheValueSerializer(GenericJacksonJsonRedisSerializer.builder().build()),
+        )
+        val entry = codec.valueEntry(record)
+
+        val survived = throughStringChannel(entry)
+        survived.contentEquals(entry) shouldBe true
+        (codec.decode(survived) as LeaseCacheEntry.Value).value shouldBe record
     }
 })
