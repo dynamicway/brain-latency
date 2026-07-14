@@ -41,7 +41,7 @@ import java.util.concurrent.Callable
  */
 class TransactionAwareEvictCache(
     private val name: String,
-    private val delegate: LeaseCache,
+    private val delegate: LeaseCache<Any>,
 ) : Cache {
 
     override fun getName(): String = name
@@ -51,9 +51,15 @@ class TransactionAwareEvictCache(
     // The `@Cacheable(sync = true)` path: single-flight load, handled by the delegate.
     // A loader failure comes back as the core's LeaseCacheLoadException and is mapped
     // onto the exception Spring's contract prescribes for get(key, valueLoader).
+    //
+    // This is the Object boundary: Spring's Cache contract is untyped, so the engine is
+    // driven at LeaseCache<Any> and the result is cast back to the caller's T. That
+    // unchecked cast is inherent to Spring's `<T> T get(..)` signature and lives here,
+    // at the edge -- not in the typed core.
     override fun <T : Any> get(key: Any, valueLoader: Callable<T>): T? =
         try {
-            delegate.get(redisKey(key)) { valueLoader.call() }
+            @Suppress("UNCHECKED_CAST")
+            delegate.get(redisKey(key)) { valueLoader.call() } as T?
         } catch (ex: LeaseCacheLoadException) {
             throw Cache.ValueRetrievalException(key, valueLoader, ex.cause)
         }

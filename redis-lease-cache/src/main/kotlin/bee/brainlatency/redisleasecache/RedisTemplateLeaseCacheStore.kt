@@ -17,15 +17,15 @@ import java.util.UUID
  * KEYS/ARGV ordering, byte-encoded durations, entry framing, or raw lease bytes:
  * [LeaseToken] unwraps to [ByteArray] only right here, at the Redis I/O boundary.
  */
-class RedisTemplateLeaseCacheStore(
+class RedisTemplateLeaseCacheStore<V : Any>(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
-    private val codec: LeaseCacheCodec,
-) : LeaseCacheStore {
+    private val codec: LeaseCacheCodec<V>,
+) : LeaseCacheStore<V> {
 
     override fun newLease(): LeaseToken =
         LeaseToken(codec.leaseEntry(UUID.randomUUID().toString().toByteArray(Charsets.UTF_8)))
 
-    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry {
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> {
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
@@ -35,7 +35,7 @@ class RedisTemplateLeaseCacheStore(
         return codec.decode(raw)
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration) {
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),

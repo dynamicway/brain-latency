@@ -8,7 +8,7 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 class RedisLeaseCacheManager(
-    store: LeaseCacheStore,
+    store: LeaseCacheStore<Any>,
     leaseTtl: Duration,
     valueTtl: Duration,
     pollInterval: Duration = Duration.ofMillis(50),
@@ -16,7 +16,10 @@ class RedisLeaseCacheManager(
 ) : CacheManager {
 
     // Name-agnostic engine shared by every named cache; the per-name adapters below
-    // namespace the keys they hand it.
+    // namespace the keys they hand it. The Spring Cache contract is untyped, so the
+    // shared engine runs at LeaseCache<Any>; a caller wanting a statically typed cache
+    // constructs LeaseCache<V> directly against a LeaseCacheStore<V>, outside this
+    // CacheManager (whose getCache(name) can only ever hand back an untyped Cache).
     private val leaseCache = LeaseCache(store, leaseTtl, valueTtl, pollInterval, waitTimeout)
 
     private val caches = ConcurrentHashMap<String, Cache>()
