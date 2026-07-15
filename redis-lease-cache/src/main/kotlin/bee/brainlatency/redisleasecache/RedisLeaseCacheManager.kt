@@ -13,6 +13,7 @@ class RedisLeaseCacheManager(
     valueTtl: Duration,
     pollInterval: Duration = Duration.ofMillis(50),
     waitTimeout: Duration = leaseTtl.multipliedBy(2),
+    storeStallShare: Double = 0.5,
 ) : CacheManager {
 
     // Name-agnostic engine shared by every named cache; the per-name adapters below
@@ -20,7 +21,7 @@ class RedisLeaseCacheManager(
     // shared engine runs at LeaseCache<Any>; a caller wanting a statically typed cache
     // constructs LeaseCache<V> directly against a LeaseCacheStore<V>, outside this
     // CacheManager (whose getCache(name) can only ever hand back an untyped Cache).
-    private val leaseCache = LeaseCache(store, leaseTtl, valueTtl, pollInterval, waitTimeout)
+    private val leaseCache = LeaseCache(store, leaseTtl, valueTtl, pollInterval, waitTimeout, storeStallShare)
 
     private val caches = ConcurrentHashMap<String, Cache>()
 

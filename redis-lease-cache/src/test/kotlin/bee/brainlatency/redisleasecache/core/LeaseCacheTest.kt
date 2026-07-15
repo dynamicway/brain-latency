@@ -158,7 +158,7 @@ class LeaseCacheTest : StringSpec({
         cache.get("resource-9") { "took-over" } shouldBe "took-over"
     }
 
-    "a waiter gives up after waitTimeout while the lease is still held" {
+    "a waiter that times out with fast store round-trips blames the origin load and fails closed" {
         val impatientCache = LeaseCache(
             store,
             leaseTtl = Duration.ofSeconds(5),
@@ -166,11 +166,58 @@ class LeaseCacheTest : StringSpec({
             pollInterval = Duration.ofMillis(50),
             waitTimeout = Duration.ofMillis(300),
         )
+        // the in-memory store answers instantly, so the wait was spent waiting on a
+        // holder that never publishes -- an origin bottleneck, not a cache one
         val foreignLeaseToken = store.newLease()
         store.getOrAcquire("resource-10", foreignLeaseToken, Duration.ofSeconds(5))
 
-        shouldThrow<IllegalStateException> {
-            impatientCache.get("resource-10") { "value" }
+        val ex = shouldThrow<LeaseCacheWaitTimeoutException> {
+            impatientCache.get("resource-10") { "should-not-load" }
         }
+        // did NOT fall back to the loader: the origin is presumed struggling
+        (ex.storeWait < ex.waited) shouldBe true
+    }
+
+    "a waiter that times out because store round-trips dominate fails open and loads from the origin" {
+        // a store whose every getOrAcquire is slow: the wait is eaten by cache I/O, not
+        // by a holder sitting on the lease -- the cache tier is the bottleneck
+        val slowStore = SlowGetOrAcquireStore(FakeLeaseCacheStore(), delay = Duration.ofMillis(80))
+        val failOpenCache = LeaseCache(
+            slowStore,
+            leaseTtl = Duration.ofSeconds(5),
+            valueTtl = Duration.ofSeconds(5),
+            pollInterval = Duration.ofMillis(1),
+            waitTimeout = Duration.ofMillis(200),
+        )
+        // a foreign holder keeps every poll returning Held so we never get granted
+        val foreignLeaseToken = slowStore.newLease()
+        slowStore.getOrAcquire("resource-13", foreignLeaseToken, Duration.ofSeconds(5))
+
+        val loads = AtomicInteger(0)
+        // fell open: the loader ran once and its value was returned, no exception
+        failOpenCache.get("resource-13") { "origin-${loads.incrementAndGet()}" } shouldBe "origin-1"
+        loads.get() shouldBe 1
     }
 })
+
+// A store whose getOrAcquire is artificially slow, so a waiter's polling round-trips
+// dominate the wait -- exercising the cache-tier-stall branch of LeaseCache's timeout
+// diagnosis. Every other operation delegates straight through.
+private class SlowGetOrAcquireStore(
+    private val delegate: FakeLeaseCacheStore<Any>,
+    private val delay: Duration,
+) : LeaseCacheStore<Any> {
+    override fun newLease(): LeaseToken = delegate.newLease()
+
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<Any> {
+        Thread.sleep(delay.toMillis())
+        return delegate.getOrAcquire(key, leaseToken, leaseTtl)
+    }
+
+    override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Boolean =
+        delegate.publish(key, leaseToken, value, valueTtl)
+
+    override fun release(key: String, leaseToken: LeaseToken) = delegate.release(key, leaseToken)
+
+    override fun evict(key: String): Boolean = delegate.evict(key)
+}
