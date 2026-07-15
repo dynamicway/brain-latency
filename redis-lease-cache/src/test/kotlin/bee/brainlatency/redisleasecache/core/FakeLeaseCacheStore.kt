@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong
  * plain maps and monotonic tokens stand in for the real store's atomic script and
  * byte framing, while preserving the same lease-fencing contract the domain relies on.
  */
-class FakeLeaseCacheStore : LeaseCacheStore {
+class FakeLeaseCacheStore<V : Any> : LeaseCacheStore<V> {
 
     private sealed interface StoredEntry {
         val expiresAt: Long
@@ -23,9 +23,9 @@ class FakeLeaseCacheStore : LeaseCacheStore {
 
     override fun newLease(): LeaseToken = LeaseToken(tokenSequence.incrementAndGet().toString().toByteArray())
 
-    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry = synchronized(lock) {
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> = synchronized(lock) {
         when (val current = liveEntry(key)) {
-            is StoredEntry.Valued -> LeaseCacheEntry.Value(current.value)
+            is StoredEntry.Valued -> @Suppress("UNCHECKED_CAST") LeaseCacheEntry.Value(current.value as V?)
             is StoredEntry.Leased -> LeaseCacheEntry.Held(current.token)
             null -> {
                 entries[key] = StoredEntry.Leased(leaseToken, expiresAt(leaseTtl))
@@ -34,7 +34,7 @@ class FakeLeaseCacheStore : LeaseCacheStore {
         }
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Unit = synchronized(lock) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Unit = synchronized(lock) {
         val current = entries[key]
         if (current is StoredEntry.Leased && current.token.matches(leaseToken)) {
             entries[key] = StoredEntry.Valued(value, expiresAt(valueTtl))

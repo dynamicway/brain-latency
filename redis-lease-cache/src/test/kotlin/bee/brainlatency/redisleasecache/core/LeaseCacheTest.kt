@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class LeaseCacheTest : StringSpec({
 
-    val store = FakeLeaseCacheStore()
+    val store = FakeLeaseCacheStore<Any>()
     val cache = LeaseCache(store, leaseTtl = Duration.ofSeconds(5), valueTtl = Duration.ofSeconds(5))
 
     "get(valueLoader) loads once on miss then serves the cached value without reloading" {
@@ -95,6 +95,23 @@ class LeaseCacheTest : StringSpec({
         cache.get("resource-7", zombieLoader) shouldBe "stale"
         // ...but the fenced publish did NOT clobber the newer holder's value
         cache.get("resource-7") { "reloaded" } shouldBe "fresh"
+    }
+
+    "an eviction racing a freshly-granted lease prevents the loader's stale publish from resurrecting the key" {
+        val loader = {
+            // simulate a plain evict landing while we're still off loading -- unlike
+            // the zombie scenarios above, nobody takes the lease over and republishes
+            cache.evict("resource-11")
+            "stale"
+        }
+
+        // our caller still gets the value we loaded...
+        cache.get("resource-11", loader) shouldBe "stale"
+        // ...but the fenced publish did NOT resurrect the evicted key -- the miss
+        // that follows is genuine, not a replay of the stale value
+        val loads = AtomicInteger(0)
+        cache.get("resource-11") { "reloaded-${loads.incrementAndGet()}" } shouldBe "reloaded-1"
+        loads.get() shouldBe 1
     }
 
     "a waiter polls while another loader holds the lease and returns the published value" {
