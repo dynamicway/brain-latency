@@ -13,16 +13,16 @@ import java.time.Duration
  * takes effect only while the key still holds that exact token, which is what keeps
  * zombie loaders from clobbering a newer holder.
  */
-interface LeaseCacheStore {
+interface LeaseCacheStore<V : Any> {
 
     /** A fresh, uniquely-identified lease token to attempt acquisition with. */
     fun newLease(): LeaseToken
 
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
-    fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry
+    fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V>
 
     /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseToken]. */
-    fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration)
+    fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration)
 
     /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
     fun release(key: String, leaseToken: LeaseToken)
