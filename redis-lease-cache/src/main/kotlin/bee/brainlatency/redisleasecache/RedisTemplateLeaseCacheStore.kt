@@ -35,14 +35,15 @@ class RedisTemplateLeaseCacheStore<V : Any>(
         return codec.decode(raw)
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration) {
-        redisTemplate.execute(
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean {
+        val landed = redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
             leaseToken.toBytes(),
             codec.valueEntry(value),
             valueTtl.toArgvMillis(),
         )
+        return landed == 1L
     }
 
     override fun release(key: String, leaseToken: LeaseToken) {

@@ -22,6 +22,16 @@ import kotlin.random.Random
  * write. A slow "zombie" loader whose lease already expired (and was taken over) fails
  * the CAS and cannot overwrite the newer holder's fresh entry.
  *
+ * The same fence also catches a narrower race: the key is evicted (e.g. by a writer
+ * invalidating it) right after we were granted the lease but before our publish lands.
+ * Nobody takes the lease over in that case, so instead of handing our caller a value
+ * that may already be stale relative to whatever the evict was reacting to, the granted
+ * loader re-runs -- bounded by the same [waitTimeout] a waiter is bounded by -- so a
+ * settled race gets us a value that actually lands in the cache. If the race keeps
+ * recurring until the deadline, we give up retrying and return the last value loaded
+ * rather than fail the caller outright: the loader itself never failed, so there is no
+ * [LeaseCacheLoadException] to throw, only a value we couldn't cache.
+ *
  * It is name-agnostic and stateless beyond its config, so a single instance backs every
  * named cache: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`) owns the
  * cache name and hands down already-namespaced keys. It exposes only the two operations
@@ -52,7 +62,15 @@ class LeaseCache<V : Any>(
 
                 is LeaseCacheEntry.Held -> {
                     if (entry.isHeldBy(leaseToken)) {
-                        return loadAndPublish(key, leaseToken, valueLoader)
+                        val (loaded, published) = loadAndPublish(key, leaseToken, valueLoader)
+                        if (published || System.nanoTime() >= deadline) return loaded
+                        // Fenced out -- most likely an evict raced our publish rather
+                        // than a takeover (a takeover would show up as a Value entry on
+                        // the next loop instead). The value we hold may already be
+                        // stale, so don't trust it yet: re-acquire and reload instead of
+                        // returning it outright.
+                        sleepBeforeRepoll()
+                        continue
                     }
                     if (System.nanoTime() >= deadline) {
                         throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
@@ -72,11 +90,11 @@ class LeaseCache<V : Any>(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun loadAndPublish(key: String, leaseToken: LeaseToken, valueLoader: () -> V?): V? {
-        // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
-        // value lands only if the key still holds our lease token, so a zombie loader
-        // whose lease expired can't clobber the holder that took over. Either way we
-        // return the loaded value to our own caller.
+    // We hold the load lease. Fetch, then publish with a token-fenced CAS: the value
+    // lands only if the key still holds our lease token, so a zombie loader whose
+    // lease expired -- or was evicted out from under it -- can't clobber (or
+    // resurrect) a fresher entry. The caller decides what to do when it doesn't land.
+    private fun loadAndPublish(key: String, leaseToken: LeaseToken, valueLoader: () -> V?): Pair<V?, Boolean> {
         val loaded: V? = try {
             valueLoader()
         } catch (ex: Throwable) {
@@ -85,8 +103,8 @@ class LeaseCache<V : Any>(
             store.release(key, leaseToken)
             throw LeaseCacheLoadException(key, ex)
         }
-        store.publish(key, leaseToken, loaded, valueTtl)
-        return loaded
+        val published = store.publish(key, leaseToken, loaded, valueTtl)
+        return loaded to published
     }
 }
 

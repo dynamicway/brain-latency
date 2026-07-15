@@ -40,16 +40,16 @@ class RedisLeaseCacheConfiguration(
     }
 
     @Bean
-    fun leaseCacheCodec(): LeaseCacheCodec =
-        LeaseCacheCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java()))
+    fun leaseCacheCodec(): LeaseCacheCodec<Any> =
+        LeaseCacheCodec(RedisSerializerLeaseCacheSerializer(RedisSerializer.java(), Any::class.java))
 
     @Bean
     fun leaseCacheStore(
         leaseCacheRedisTemplate: RedisTemplate<String, ByteArray>,
-        leaseCacheCodec: LeaseCacheCodec,
-    ): RedisTemplateLeaseCacheStore = RedisTemplateLeaseCacheStore(leaseCacheRedisTemplate, leaseCacheCodec)
+        leaseCacheCodec: LeaseCacheCodec<Any>,
+    ): RedisTemplateLeaseCacheStore<Any> = RedisTemplateLeaseCacheStore(leaseCacheRedisTemplate, leaseCacheCodec)
 
     @Bean
-    fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore): CacheManager =
+    fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore<Any>): CacheManager =
         RedisLeaseCacheManager(leaseCacheStore, leaseTtl, valueTtl)
 }

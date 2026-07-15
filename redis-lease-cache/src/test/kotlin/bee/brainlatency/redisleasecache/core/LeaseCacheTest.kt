@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class LeaseCacheTest : StringSpec({
 
-    val store = FakeLeaseCacheStore()
+    val store = FakeLeaseCacheStore<Any>()
     val cache = LeaseCache(store, leaseTtl = Duration.ofSeconds(5), valueTtl = Duration.ofSeconds(5))
 
     "get(valueLoader) loads once on miss then serves the cached value without reloading" {
@@ -83,7 +83,7 @@ class LeaseCacheTest : StringSpec({
         cache.get("resource-6") { "reloaded" } shouldBe "fresh"
     }
 
-    "a zombie loader whose lease was taken over cannot overwrite the newer entry" {
+    "a zombie loader whose lease was taken over yields to the newer entry instead of returning its own stale load" {
         val zombieLoader = {
             // simulate our lease being lost and a new holder publishing a fresh value
             cache.evict("resource-7")
@@ -91,10 +91,52 @@ class LeaseCacheTest : StringSpec({
             "stale"
         }
 
-        // our caller still gets the value we loaded...
-        cache.get("resource-7", zombieLoader) shouldBe "stale"
-        // ...but the fenced publish did NOT clobber the newer holder's value
+        // the fenced publish didn't land, so we retry rather than hand back "stale" --
+        // the retry finds the newer holder's value already cached and returns that
+        cache.get("resource-7", zombieLoader) shouldBe "fresh"
         cache.get("resource-7") { "reloaded" } shouldBe "fresh"
+    }
+
+    "an eviction that races only the first publish attempt is recovered by retrying the load" {
+        val attempts = AtomicInteger(0)
+        val loader = {
+            val n = attempts.incrementAndGet()
+            if (n == 1) {
+                // simulate a plain evict landing while we're still off loading --
+                // unlike the zombie scenario above, nobody takes the lease over
+                store.evict("resource-11")
+            }
+            "attempt-$n"
+        }
+
+        cache.get("resource-11", loader) shouldBe "attempt-2"
+        attempts.get() shouldBe 2
+        // the retry's publish landed for real this time -- it's actually cached
+        cache.get("resource-11") { "should-not-load" } shouldBe "attempt-2"
+    }
+
+    "an eviction racing every retry attempt eventually gives up and returns the last loaded value without caching it" {
+        val impatientCache = LeaseCache(
+            store,
+            leaseTtl = Duration.ofSeconds(5),
+            valueTtl = Duration.ofSeconds(5),
+            pollInterval = Duration.ofMillis(20),
+            waitTimeout = Duration.ofMillis(150),
+        )
+        val attempts = AtomicInteger(0)
+        val alwaysRacingLoader = {
+            val n = attempts.incrementAndGet()
+            store.evict("resource-12")
+            "attempt-$n"
+        }
+
+        val result = impatientCache.get("resource-12", alwaysRacingLoader)
+
+        result shouldBe "attempt-${attempts.get()}"
+        (attempts.get() > 1) shouldBe true
+        // never landed -- the next call is a genuine miss, not a replay of the give-up value
+        val reloads = AtomicInteger(0)
+        impatientCache.get("resource-12") { "reloaded-${reloads.incrementAndGet()}" } shouldBe "reloaded-1"
     }
 
     "a waiter polls while another loader holds the lease and returns the published value" {
