@@ -31,17 +31,17 @@ import kotlin.random.Random
  * settled race gets us a value that actually lands in the cache. If the race keeps
  * recurring until the deadline, we give up retrying and return the last value loaded
  * rather than fail the caller outright: the loader itself never failed, so there is no
- * [LeaseCacheLoadException] to throw, only a value we couldn't cache.
+ * [LeaseCacheOriginException] to throw, only a value we couldn't cache.
  *
  * ## Telling a cache failure from an origin failure
  *
  * Every failure surfaces as a typed [LeaseCacheException] whose subtype says *where* it
  * came from, so callers never have to guess whether the cache tier or the backing origin
  * is at fault:
- *  - [LeaseCacheLoadException] -- the caller's own `valueLoader` (the origin read) threw.
+ *  - [LeaseCacheOriginException] -- the backing origin is at fault: either the caller's own
+ *    `valueLoader` (the origin read) threw, or a waiter timed out with the origin load
+ *    diagnosed as the bottleneck (told apart by whether `cause` is set; see below).
  *  - [LeaseCacheStoreException] -- a [LeaseCacheStore] operation (the cache I/O) threw.
- *  - [LeaseCacheWaitTimeoutException] -- a waiter gave up after [waitTimeout] *and* the
- *    wait was diagnosed as an origin bottleneck (see below).
  *
  * A pure waiter -- one that never held the lease -- can't observe the holder's loader
  * directly, so when it times out it can't say outright whether the origin load is slow
@@ -52,8 +52,8 @@ import kotlin.random.Random
  * origin is presumably healthy, so we fail open and load from the origin directly rather
  * than fail the caller. Otherwise the *origin* load is the bottleneck (leases keep being
  * acquired but nothing gets published in time); piling another origin read on would only
- * add load to something already struggling, so we fail closed with a
- * [LeaseCacheWaitTimeoutException] and let the caller decide.
+ * add load to something already struggling, so we fail closed with a (cause-less)
+ * [LeaseCacheOriginException] and let the caller decide.
  *
  * It is name-agnostic and stateless beyond its config, so a single instance backs every
  * named cache: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`) owns the
@@ -143,10 +143,10 @@ class LeaseCache<V : Any>(
             return try {
                 valueLoader()
             } catch (ex: Throwable) {
-                throw LeaseCacheLoadException(key, ex)
+                throw LeaseCacheOriginException.loaderThrew(key, ex)
             }
         }
-        throw LeaseCacheWaitTimeoutException(key, elapsed, storeWait)
+        throw LeaseCacheOriginException.tooSlow(key, elapsed, storeWait)
     }
 
     // Jittered so a herd of waiters woken by the same miss doesn't re-poll in lockstep.
@@ -172,7 +172,7 @@ class LeaseCache<V : Any>(
             } catch (_: Throwable) {
                 // swallowed: lease expires via leaseTtl
             }
-            throw LeaseCacheLoadException(key, ex)
+            throw LeaseCacheOriginException.loaderThrew(key, ex)
         }
         val published = cacheStore("publish", key) { store.publish(key, leaseToken, loaded, valueTtl) }
         return loaded to published
@@ -193,29 +193,39 @@ class LeaseCache<V : Any>(
 }
 
 /**
- * Base type for every failure [LeaseCache.get] raises. Its subtype pins down the source
- * -- the origin loader ([LeaseCacheLoadException]), the cache store
- * ([LeaseCacheStoreException]), or an origin-bottleneck wait timeout
- * ([LeaseCacheWaitTimeoutException]) -- so callers can catch broadly and branch precisely.
+ * Base type for every failure [LeaseCache.get] raises. It splits exactly one way -- by
+ * *where* the fault is: the backing origin ([LeaseCacheOriginException]) or the cache tier
+ * ([LeaseCacheStoreException]) -- so a caller can catch one and degrade, alert, or fail
+ * accordingly without guessing.
  */
 sealed class LeaseCacheException(message: String, cause: Throwable?) : RuntimeException(message, cause)
 
-/** The caller's `valueLoader` (the origin read) threw; any load lease has already been released. */
-class LeaseCacheLoadException(key: String, cause: Throwable) :
-    LeaseCacheException("value loader failed for key [$key]", cause)
+/**
+ * The backing origin is at fault. Two modes, told apart by [cause]:
+ *  - [cause] set -- the caller's own `valueLoader` (the origin read) threw it; any load
+ *    lease has already been released.
+ *  - [cause] `null` -- a waiter timed out and diagnosed the origin load as the bottleneck
+ *    (store round-trips were only a small share of the wait); the diagnosis figures are in
+ *    the message. Nothing added another origin read on top, so the caller decides.
+ */
+class LeaseCacheOriginException private constructor(message: String, cause: Throwable?) :
+    LeaseCacheException(message, cause) {
+
+    companion object {
+        /** The origin read ([valueLoader]) threw. */
+        fun loaderThrew(key: String, cause: Throwable): LeaseCacheOriginException =
+            LeaseCacheOriginException("value loader failed for key [$key]", cause)
+
+        /** A waiter gave up, having diagnosed the origin (not the cache tier) as the bottleneck. */
+        fun tooSlow(key: String, waited: Duration, storeWait: Duration): LeaseCacheOriginException =
+            LeaseCacheOriginException(
+                "timed out after $waited waiting for another loader to publish key [$key]; " +
+                    "store round-trips took only $storeWait, so the origin load is the bottleneck",
+                null,
+            )
+    }
+}
 
 /** A [LeaseCacheStore] operation (the cache I/O) threw -- a cache-tier fault, not an origin one. */
 class LeaseCacheStoreException(operation: String, key: String, cause: Throwable) :
     LeaseCacheException("cache store operation [$operation] failed for key [$key]", cause)
-
-/**
- * A waiter gave up after the wait timeout, having diagnosed the *origin* load as the
- * bottleneck (store round-trips were only a small share of the wait). Carries the
- * measured [waited] and [storeWait] so the caller can log or act on the diagnosis.
- */
-class LeaseCacheWaitTimeoutException(key: String, val waited: Duration, val storeWait: Duration) :
-    LeaseCacheException(
-        "timed out after $waited waiting for another loader to publish key [$key]; " +
-            "store round-trips took only $storeWait, so the origin load is the bottleneck",
-        null,
-    )

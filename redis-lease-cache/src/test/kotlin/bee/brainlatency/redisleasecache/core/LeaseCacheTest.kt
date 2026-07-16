@@ -60,7 +60,7 @@ class LeaseCacheTest : StringSpec({
     }
 
     "a failing loader releases the lease so the next caller reloads immediately" {
-        shouldThrow<LeaseCacheLoadException> {
+        shouldThrow<LeaseCacheOriginException> {
             cache.get("resource-5") { error("boom") }
         }
 
@@ -76,7 +76,7 @@ class LeaseCacheTest : StringSpec({
             error("boom")
         }
 
-        shouldThrow<LeaseCacheLoadException> {
+        shouldThrow<LeaseCacheOriginException> {
             cache.get("resource-6", zombieLoader)
         }
         // the fenced release did NOT delete the newer holder's value
@@ -171,11 +171,12 @@ class LeaseCacheTest : StringSpec({
         val foreignLeaseToken = store.newLease()
         store.getOrAcquire("resource-10", foreignLeaseToken, Duration.ofSeconds(5))
 
-        val ex = shouldThrow<LeaseCacheWaitTimeoutException> {
+        val ex = shouldThrow<LeaseCacheOriginException> {
             impatientCache.get("resource-10") { "should-not-load" }
         }
-        // did NOT fall back to the loader: the origin is presumed struggling
-        (ex.storeWait < ex.waited) shouldBe true
+        // an origin fault with no cause: the timeout flavour, not a loader throw -- and it
+        // did NOT fall back to the loader, since the origin is presumed struggling
+        ex.cause.shouldBeNull()
     }
 
     "a waiter that times out because store round-trips dominate fails open and loads from the origin" {
