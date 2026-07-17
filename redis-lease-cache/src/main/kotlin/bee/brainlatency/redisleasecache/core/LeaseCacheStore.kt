@@ -12,6 +12,12 @@ import java.time.Duration
  * byte-framing type. Every operation taking a lease token must be fenced on it: it
  * takes effect only while the key still holds that exact token, which is what keeps
  * zombie loaders from clobbering a newer holder.
+ *
+ * A store that itself fails -- as opposed to losing a fenced race, which the return
+ * values express -- must throw [LeaseStoreException]. The adapter is the one that knows
+ * what its client's failures look like, so the translation lives there, and the core
+ * can rely on every operation either answering in domain terms or raising that one
+ * domain failure.
  */
 interface LeaseCacheStore<V : Any> {
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */

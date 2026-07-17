@@ -152,12 +152,14 @@ class LeaseCacheTest : StringSpec({
         }
     }
 
-    "a store that fails to publish surfaces as a store outage, not a loader failure" {
+    // Per the port contract, a store signals its own failure by throwing
+    // LeaseStoreException itself; the core propagates it as-is.
+    "a store that fails to publish surfaces as the store's own outage, not a loader failure" {
         val outage = RuntimeException("redis down")
         val brokenCache = LeaseCache(
             object : LeaseCacheStore<Any> by store {
                 override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Boolean =
-                    throw outage
+                    throw LeaseStoreException(key, outage)
             },
             leaseTtl = Duration.ofSeconds(5),
             valueTtl = Duration.ofSeconds(5),
@@ -173,7 +175,8 @@ class LeaseCacheTest : StringSpec({
         val outage = RuntimeException("redis down")
         val brokenCache = LeaseCache(
             object : LeaseCacheStore<Any> by store {
-                override fun release(key: String, leaseToken: LeaseToken): Unit = throw outage
+                override fun release(key: String, leaseToken: LeaseToken): Unit =
+                    throw LeaseStoreException(key, outage)
             },
             leaseTtl = Duration.ofSeconds(5),
             valueTtl = Duration.ofSeconds(5),

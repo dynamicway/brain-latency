@@ -45,38 +45,32 @@ class LeaseCache<V : Any>(
     // the moment the value lands we return it, and if the lease expires instead
     // (the loader died) we are granted and take over.
     //
-    // Every path that does not return re-enters this loop through the deadline check,
-    // so no amount of losing (to a poller, to an evict) can spin past waitTimeout.
+    // The loop has exactly two exits -- a return, or running out the deadline in the
+    // while condition. A branch that neither returns nor throws simply falls to the
+    // bottom and re-enters: the not-ours branch after its poll sleep, and the granted
+    // branch when its token-fenced publish loses the CAS. Losing that CAS means our
+    // lease is gone (expired and taken over, or evicted out from under us), so the
+    // value we loaded was never cached: starting over -- rather than returning it --
+    // is what makes a racing evict actually take effect, because the next pass either
+    // hits whatever the winner published or re-acquires and reloads.
     fun get(key: String, valueLoader: () -> V?): V? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
-        while (true) {
-            if (System.nanoTime() >= deadline) {
-                throw LeaseWaitTimeoutException(key, waitTimeout)
-            }
+        while (System.nanoTime() < deadline) {
             val leaseToken = LeaseToken.new()
 
             when (val entry = store.getOrAcquire(key, leaseToken, leaseTtl)) {
                 is LeaseCacheEntry.Value -> return entry.value
 
-                is LeaseCacheEntry.Held -> {
-                    if (!entry.isHeldBy(leaseToken)) {
-                        // Someone else is loading; poll and re-read.
+                is LeaseCacheEntry.Held ->
+                    if (entry.isHeldBy(leaseToken)) {
+                        val loaded = loadOrRelease(key, leaseToken, valueLoader)
+                        if (store.publish(key, leaseToken, loaded, valueTtl)) return loaded
+                    } else {
                         sleepBeforeRepoll()
-                        continue
                     }
-                    // We hold the lease: load, then publish under a token-fenced CAS.
-                    val loaded = loadOrRelease(key, leaseToken, valueLoader)
-                    if (publishFenced(key, leaseToken, loaded)) {
-                        return loaded
-                    }
-                    // The CAS lost: our lease is gone (expired and taken over, or the key
-                    // was evicted out from under us), so the value we hold was never
-                    // cached. Start over rather than return it -- the next pass either
-                    // hits whatever the winner published or re-acquires and reloads,
-                    // which is what makes a racing evict actually take effect.
-                }
             }
         }
+        throw LeaseWaitTimeoutException(key, waitTimeout)
     }
 
     /** Remove the entry at [key] -- a value or an in-flight lease alike. Returns whether it existed. */
@@ -92,29 +86,19 @@ class LeaseCache<V : Any>(
     // publish) so a waiter takes over immediately instead of waiting out leaseTtl.
     // Whether that release lands or loses its own race is immaterial to the caller --
     // either way the loader is what failed, so the origin failure is what surfaces.
-    // Only the store *erroring* changes the story: then the coordination layer is down,
-    // not the origin, and the loader's exception rides along as suppressed.
+    // Only the store *erroring* changes the story (the port throws its own
+    // LeaseStoreException for that): then the coordination layer is down, not the
+    // origin, and the loader's exception rides along as suppressed.
     private fun loadOrRelease(key: String, leaseToken: LeaseToken, valueLoader: () -> V?): V? {
         try {
             return valueLoader()
         } catch (loadEx: Throwable) {
             try {
                 store.release(key, leaseToken)
-            } catch (storeEx: Throwable) {
-                throw LeaseStoreException(key, storeEx).apply { addSuppressed(loadEx) }
+            } catch (storeEx: LeaseStoreException) {
+                throw storeEx.apply { addSuppressed(loadEx) }
             }
             throw OriginLoadException(key, loadEx)
         }
     }
-
-    // Publish with a token-fenced CAS: the value lands only if the key still holds our
-    // lease token, so a zombie loader whose lease expired can't clobber the holder that
-    // took over. Returns whether the write landed; a store error is an outage, not a
-    // lost race, so it surfaces rather than looking like a losing CAS.
-    private fun publishFenced(key: String, leaseToken: LeaseToken, value: V?): Boolean =
-        try {
-            store.publish(key, leaseToken, value, valueTtl)
-        } catch (storeEx: Throwable) {
-            throw LeaseStoreException(key, storeEx)
-        }
 }
