@@ -1,8 +1,9 @@
 package bee.brainlatency.redisleasecache
 
 import bee.brainlatency.redisleasecache.core.LeaseCache
-import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
+import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntry
+import bee.brainlatency.redisleasecache.core.LeaseToken
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
@@ -31,7 +32,7 @@ class RedisLeaseCacheConcurrencyTest : StringSpec({
         valueSerializer = RedisSerializer.byteArray()
         afterPropertiesSet()
     }
-    val codec = LeaseCacheCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java()))
+    val codec = LeaseCacheEntryCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java(), Any::class.java))
     val store = RedisTemplateLeaseCacheStore(redisTemplate, codec)
 
     afterTest {
@@ -64,7 +65,7 @@ class RedisLeaseCacheConcurrencyTest : StringSpec({
 
     "GET_OR_ACQUIRE is atomic under concurrent callers: exactly one of many racing tokens is granted the load lease" {
         val key = "concurrency::resource-1"
-        val tokens = (0 until 20).map { store.newLease() }
+        val tokens = (0 until 20).map { LeaseToken.new() }
 
         val entries = runConcurrently(tokens.size) { i ->
             store.getOrAcquire(key, tokens[i], Duration.ofSeconds(5)) as LeaseCacheEntry.Held
@@ -79,9 +80,9 @@ class RedisLeaseCacheConcurrencyTest : StringSpec({
 
     "PUBLISH is fenced under concurrent writers: only the entry's real lease token can land a value" {
         val key = "concurrency::resource-2"
-        val realToken = store.newLease()
+        val realToken = LeaseToken.new()
         store.getOrAcquire(key, realToken, Duration.ofSeconds(5))
-        val foreignTokens = (0 until 19).map { store.newLease() }
+        val foreignTokens = (0 until 19).map { LeaseToken.new() }
 
         runConcurrently(foreignTokens.size + 1) { i ->
             if (i == 0) {
@@ -91,20 +92,20 @@ class RedisLeaseCacheConcurrencyTest : StringSpec({
             }
         }
 
-        val settled = store.getOrAcquire(key, store.newLease(), Duration.ofSeconds(5))
+        val settled = store.getOrAcquire(key, LeaseToken.new(), Duration.ofSeconds(5))
         (settled as LeaseCacheEntry.Value).value shouldBe "real-value"
     }
 
     "RELEASE is fenced under concurrent releasers: only the entry's real lease token can release it" {
         val key = "concurrency::resource-3"
-        val realToken = store.newLease()
+        val realToken = LeaseToken.new()
         store.getOrAcquire(key, realToken, Duration.ofSeconds(5))
-        val foreignTokens = (0 until 19).map { store.newLease() }
+        val foreignTokens = (0 until 19).map { LeaseToken.new() }
 
         runConcurrently(foreignTokens.size) { i -> store.release(key, foreignTokens[i]) }
 
         // the real lease survived every foreign release attempt
-        val stillHeld = store.getOrAcquire(key, store.newLease(), Duration.ofSeconds(5)) as LeaseCacheEntry.Held
+        val stillHeld = store.getOrAcquire(key, LeaseToken.new(), Duration.ofSeconds(5)) as LeaseCacheEntry.Held
         stillHeld.isHeldBy(realToken) shouldBe true
     }
 

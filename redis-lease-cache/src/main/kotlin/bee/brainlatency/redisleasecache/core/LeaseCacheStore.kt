@@ -14,10 +14,6 @@ import java.time.Duration
  * zombie loaders from clobbering a newer holder.
  */
 interface LeaseCacheStore<V : Any> {
-
-    /** A fresh, uniquely-identified lease token to attempt acquisition with. */
-    fun newLease(): LeaseToken
-
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
     fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V>
 

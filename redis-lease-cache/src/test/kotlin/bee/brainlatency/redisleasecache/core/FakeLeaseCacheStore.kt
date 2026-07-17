@@ -1,14 +1,13 @@
 package bee.brainlatency.redisleasecache.core
 
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * An in-memory [LeaseCacheStore] for exercising [LeaseCache] without Redis or Spring:
- * plain maps and monotonic tokens stand in for the real store's atomic script and
- * byte framing, while preserving the same lease-fencing contract the domain relies on.
+ * plain maps stand in for the real store's atomic script and byte framing, while
+ * preserving the same lease-fencing contract the domain relies on.
  */
-class FakeLeaseCacheStore : LeaseCacheStore {
+class FakeLeaseCacheStore : LeaseCacheStore<Any> {
 
     private sealed interface StoredEntry {
         val expiresAt: Long
@@ -19,11 +18,8 @@ class FakeLeaseCacheStore : LeaseCacheStore {
 
     private val lock = Any()
     private val entries = mutableMapOf<String, StoredEntry>()
-    private val tokenSequence = AtomicLong()
 
-    override fun newLease(): LeaseToken = LeaseToken(tokenSequence.incrementAndGet().toString().toByteArray())
-
-    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry = synchronized(lock) {
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<Any> = synchronized(lock) {
         when (val current = liveEntry(key)) {
             is StoredEntry.Valued -> LeaseCacheEntry.Value(current.value)
             is StoredEntry.Leased -> LeaseCacheEntry.Held(current.token)
