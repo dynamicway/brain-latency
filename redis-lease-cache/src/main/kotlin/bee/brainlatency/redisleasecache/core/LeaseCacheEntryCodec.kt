@@ -12,8 +12,13 @@ package bee.brainlatency.redisleasecache.core
  */
 class LeaseCacheEntryCodec<V : Any>(private val serializer: LeaseCacheValueSerializer<V>) {
 
-    /** Frames [token] as a held load-lease entry. */
-    fun encodeLease(token: ByteArray): ByteArray = frame(TOKEN_TAG, token)
+    /**
+     * Frames [token] as a held load-lease entry -- the form a lease is both *stored* and
+     * *token-fenced* in, so the bytes on the wire carry the tag [decode] reads to tell a
+     * lease from a value, and the CAS in the store's publish/release compares like
+     * against like.
+     */
+    fun encodeLease(token: LeaseToken): ByteArray = frame(TOKEN_TAG, token.toBytes())
 
     /** Frames a loaded value, or a null as a negative-cache marker, for storage. */
     fun encodeValue(value: V?): ByteArray =
