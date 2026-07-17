@@ -45,7 +45,7 @@ class LeaseCache<V : Any>(
     fun get(key: String, valueLoader: () -> V?): V? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
-            val leaseToken = store.newLease()
+            val leaseToken = LeaseToken.new()
 
             when (val entry = store.getOrAcquire(key, leaseToken, leaseTtl)) {
                 is LeaseCacheEntry.Value -> return entry.value

@@ -98,7 +98,7 @@ class LeaseCacheTest : StringSpec({
     }
 
     "a waiter polls while another loader holds the lease and returns the published value" {
-        val foreignLeaseToken = store.newLease()
+        val foreignLeaseToken = LeaseToken.new()
         store.getOrAcquire("resource-8", foreignLeaseToken, Duration.ofSeconds(5))
         Thread {
             Thread.sleep(200)
@@ -110,7 +110,7 @@ class LeaseCacheTest : StringSpec({
 
     "a waiter takes over when the holder's lease expires without a publish" {
         // a foreign lease that dies without publishing
-        val foreignLeaseToken = store.newLease()
+        val foreignLeaseToken = LeaseToken.new()
         store.getOrAcquire("resource-9", foreignLeaseToken, Duration.ofMillis(200))
 
         cache.get("resource-9") { "took-over" } shouldBe "took-over"
@@ -124,7 +124,7 @@ class LeaseCacheTest : StringSpec({
             pollInterval = Duration.ofMillis(50),
             waitTimeout = Duration.ofMillis(300),
         )
-        val foreignLeaseToken = store.newLease()
+        val foreignLeaseToken = LeaseToken.new()
         store.getOrAcquire("resource-10", foreignLeaseToken, Duration.ofSeconds(5))
 
         shouldThrow<IllegalStateException> {

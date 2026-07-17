@@ -8,7 +8,7 @@ package bee.brainlatency.redisleasecache.core
  * layout, so the framing (or serializer, or compression) can change here alone.
  *
  * Framing only: it wraps a lease token that already exists rather than generating
- * one -- minting the token itself is [LeaseCacheStore.newLease]'s job.
+ * one -- minting the token itself is [LeaseToken.new]'s job.
  */
 class LeaseCacheCodec<V : Any>(private val serializer: LeaseCacheSerializer<V>) {
 
@@ -25,7 +25,7 @@ class LeaseCacheCodec<V : Any>(private val serializer: LeaseCacheSerializer<V>) 
         when (raw.firstOrNull()) {
             VALUE_TAG -> LeaseCacheEntry.Value(serializer.deserialize(raw.copyOfRange(1, raw.size)))
             NULL_TAG -> LeaseCacheEntry.Value(null)
-            TOKEN_TAG -> LeaseCacheEntry.Held(LeaseToken(raw))
+            TOKEN_TAG -> LeaseCacheEntry.Held(LeaseToken.fromBytes(raw.copyOfRange(1, raw.size)))
             else -> error("unrecognized cache entry tag: ${raw.firstOrNull()}")
         }
 
