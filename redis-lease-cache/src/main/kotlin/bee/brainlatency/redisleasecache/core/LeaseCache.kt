@@ -26,8 +26,10 @@ import kotlin.random.Random
  * named cache: an adapter (e.g. the Spring-facing `TransactionAwareEvictCache`) owns the
  * cache name and hands down already-namespaced keys. It exposes only the two operations
  * the lease protocol actually has: a single-flight [get] with a loader, and an
- * immediate [evict]. A failing loader surfaces as [LeaseCacheLoadException]; mapping
- * that onto a framework's exception contract is the adapter's job.
+ * immediate [evict]. Failures surface as a [LeaseCacheException] -- the origin refused
+ * ([OriginLoadException]), the store is down ([LeaseStoreException]), or nobody
+ * published in time ([LeaseWaitTimeoutException]); mapping those onto a framework's
+ * exception contract is the adapter's job.
  */
 class LeaseCache<V : Any>(
     private val store: LeaseCacheStore<V>,
@@ -42,22 +44,36 @@ class LeaseCache<V : Any>(
     // loader holds the lease we poll: each retry re-runs the same atomic step, so
     // the moment the value lands we return it, and if the lease expires instead
     // (the loader died) we are granted and take over.
+    //
+    // Every path that does not return re-enters this loop through the deadline check,
+    // so no amount of losing (to a poller, to an evict) can spin past waitTimeout.
     fun get(key: String, valueLoader: () -> V?): V? {
         val deadline = System.nanoTime() + waitTimeout.toNanos()
         while (true) {
+            if (System.nanoTime() >= deadline) {
+                throw LeaseWaitTimeoutException(key, waitTimeout)
+            }
             val leaseToken = LeaseToken.new()
 
             when (val entry = store.getOrAcquire(key, leaseToken, leaseTtl)) {
                 is LeaseCacheEntry.Value -> return entry.value
 
                 is LeaseCacheEntry.Held -> {
-                    if (entry.isHeldBy(leaseToken)) {
-                        return loadAndPublish(key, leaseToken, valueLoader)
+                    if (!entry.isHeldBy(leaseToken)) {
+                        // Someone else is loading; poll and re-read.
+                        sleepBeforeRepoll()
+                        continue
                     }
-                    if (System.nanoTime() >= deadline) {
-                        throw IllegalStateException("timed out after $waitTimeout waiting for another loader to publish key [$key]")
+                    // We hold the lease: load, then publish under a token-fenced CAS.
+                    val loaded = loadOrRelease(key, leaseToken, valueLoader)
+                    if (publishFenced(key, leaseToken, loaded)) {
+                        return loaded
                     }
-                    sleepBeforeRepoll()
+                    // The CAS lost: our lease is gone (expired and taken over, or the key
+                    // was evicted out from under us), so the value we hold was never
+                    // cached. Start over rather than return it -- the next pass either
+                    // hits whatever the winner published or re-acquires and reloads,
+                    // which is what makes a racing evict actually take effect.
                 }
             }
         }
@@ -72,24 +88,33 @@ class LeaseCache<V : Any>(
         Thread.sleep(base / 2 + Random.nextLong(base + 1))
     }
 
-    private fun loadAndPublish(key: String, leaseToken: LeaseToken, valueLoader: () -> V?): V? {
-        // We hold the load lease. Fetch, then publish with a token-fenced CAS: the
-        // value lands only if the key still holds our lease token, so a zombie loader
-        // whose lease expired can't clobber the holder that took over. Either way we
-        // return the loaded value to our own caller.
-        val loaded: V? = try {
-            valueLoader()
-        } catch (ex: Throwable) {
-            // Release the lease (CAS-del, fenced like publish) so a waiter takes over
-            // immediately instead of waiting out leaseTtl.
-            store.release(key, leaseToken)
-            throw LeaseCacheLoadException(key, ex)
+    // Run the caller's loader; on failure release the lease (CAS-del, fenced like
+    // publish) so a waiter takes over immediately instead of waiting out leaseTtl.
+    // Whether that release lands or loses its own race is immaterial to the caller --
+    // either way the loader is what failed, so the origin failure is what surfaces.
+    // Only the store *erroring* changes the story: then the coordination layer is down,
+    // not the origin, and the loader's exception rides along as suppressed.
+    private fun loadOrRelease(key: String, leaseToken: LeaseToken, valueLoader: () -> V?): V? {
+        try {
+            return valueLoader()
+        } catch (loadEx: Throwable) {
+            try {
+                store.release(key, leaseToken)
+            } catch (storeEx: Throwable) {
+                throw LeaseStoreException(key, storeEx).apply { addSuppressed(loadEx) }
+            }
+            throw OriginLoadException(key, loadEx)
         }
-        store.publish(key, leaseToken, loaded, valueTtl)
-        return loaded
     }
-}
 
-/** Thrown by [LeaseCache.get] when the loader itself fails; the load lease has already been released. */
-class LeaseCacheLoadException(key: String, override val cause: Throwable) :
-    RuntimeException("value loader failed for key [$key]")
+    // Publish with a token-fenced CAS: the value lands only if the key still holds our
+    // lease token, so a zombie loader whose lease expired can't clobber the holder that
+    // took over. Returns whether the write landed; a store error is an outage, not a
+    // lost race, so it surfaces rather than looking like a losing CAS.
+    private fun publishFenced(key: String, leaseToken: LeaseToken, value: V?): Boolean =
+        try {
+            store.publish(key, leaseToken, value, valueTtl)
+        } catch (storeEx: Throwable) {
+            throw LeaseStoreException(key, storeEx)
+        }
+}

@@ -31,15 +31,14 @@ class RedisTemplateLeaseCacheStore<V : Any>(
         return codec.decode(raw)
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean =
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
             codec.encodeLease(leaseToken),
             codec.encodeValue(value),
             valueTtl.toArgvMillis(),
-        )
-    }
+        ) == 1L
 
     override fun release(key: String, leaseToken: LeaseToken) {
         redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), codec.encodeLease(leaseToken))

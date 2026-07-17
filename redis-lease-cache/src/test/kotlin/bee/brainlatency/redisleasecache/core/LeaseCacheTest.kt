@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -60,7 +61,7 @@ class LeaseCacheTest : StringSpec({
     }
 
     "a failing loader releases the lease so the next caller reloads immediately" {
-        shouldThrow<LeaseCacheLoadException> {
+        shouldThrow<OriginLoadException> {
             cache.get("resource-5") { error("boom") }
         }
 
@@ -76,25 +77,44 @@ class LeaseCacheTest : StringSpec({
             error("boom")
         }
 
-        shouldThrow<LeaseCacheLoadException> {
+        shouldThrow<OriginLoadException> {
             cache.get("resource-6", zombieLoader)
         }
         // the fenced release did NOT delete the newer holder's value
         cache.get("resource-6") { "reloaded" } shouldBe "fresh"
     }
 
-    "a zombie loader whose lease was taken over cannot overwrite the newer entry" {
+    "a zombie loader whose lease was taken over serves the newer entry, not its own stale load" {
+        val loads = AtomicInteger(0)
         val zombieLoader = {
             // simulate our lease being lost and a new holder publishing a fresh value
-            cache.evict("resource-7")
-            cache.get("resource-7") { "fresh" }
+            if (loads.incrementAndGet() == 1) {
+                cache.evict("resource-7")
+                cache.get("resource-7") { "fresh" }
+            }
             "stale"
         }
 
-        // our caller still gets the value we loaded...
-        cache.get("resource-7", zombieLoader) shouldBe "stale"
-        // ...but the fenced publish did NOT clobber the newer holder's value
+        // the fenced publish loses, so we retry and hit what the winner published --
+        // the caller never sees the value we loaded against a lease we no longer held
+        cache.get("resource-7", zombieLoader) shouldBe "fresh"
         cache.get("resource-7") { "reloaded" } shouldBe "fresh"
+    }
+
+    "a publish that loses to an evict reloads instead of caching the value it already holds" {
+        val loads = AtomicInteger(0)
+        val evictingLoader = {
+            val attempt = loads.incrementAndGet()
+            // the first load races an evict that wipes our lease, so its publish loses
+            if (attempt == 1) cache.evict("resource-11")
+            "loaded-$attempt"
+        }
+
+        // first attempt's value is dropped; the retry re-acquires and loads again
+        cache.get("resource-11", evictingLoader) shouldBe "loaded-2"
+        loads.get() shouldBe 2
+        // and that second value is the one that actually landed in the cache
+        cache.get("resource-11") { "should-not-load" } shouldBe "loaded-2"
     }
 
     "a waiter polls while another loader holds the lease and returns the published value" {
@@ -127,8 +147,44 @@ class LeaseCacheTest : StringSpec({
         val foreignLeaseToken = LeaseToken.new()
         store.getOrAcquire("resource-10", foreignLeaseToken, Duration.ofSeconds(5))
 
-        shouldThrow<IllegalStateException> {
+        shouldThrow<LeaseWaitTimeoutException> {
             impatientCache.get("resource-10") { "value" }
         }
+    }
+
+    "a store that fails to publish surfaces as a store outage, not a loader failure" {
+        val outage = RuntimeException("redis down")
+        val brokenCache = LeaseCache(
+            object : LeaseCacheStore<Any> by store {
+                override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Boolean =
+                    throw outage
+            },
+            leaseTtl = Duration.ofSeconds(5),
+            valueTtl = Duration.ofSeconds(5),
+        )
+
+        val ex = shouldThrow<LeaseStoreException> {
+            brokenCache.get("resource-12") { "loaded" }
+        }
+        ex.cause shouldBe outage
+    }
+
+    "a store that fails to release reports the outage and keeps the loader failure attached" {
+        val outage = RuntimeException("redis down")
+        val brokenCache = LeaseCache(
+            object : LeaseCacheStore<Any> by store {
+                override fun release(key: String, leaseToken: LeaseToken): Unit = throw outage
+            },
+            leaseTtl = Duration.ofSeconds(5),
+            valueTtl = Duration.ofSeconds(5),
+        )
+
+        // the loader failed *and* the release failed: the outage wins, since a caller
+        // that can't reach the store has a bigger problem than its origin refusing
+        val ex = shouldThrow<LeaseStoreException> {
+            brokenCache.get("resource-13") { error("boom") }
+        }
+        ex.cause shouldBe outage
+        ex.suppressed.single().shouldBeInstanceOf<IllegalStateException>().message shouldBe "boom"
     }
 })

@@ -17,8 +17,12 @@ interface LeaseCacheStore<V : Any> {
     /** Atomically return the decoded entry at [key], or write [leaseToken] (living [leaseTtl]) and return it. */
     fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V>
 
-    /** Frame and write [value] at [key] (living [valueTtl]) only if it still holds [leaseToken]. */
-    fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration)
+    /**
+     * Frame and write [value] at [key] (living [valueTtl]) only if it still holds
+     * [leaseToken]. Returns whether the write landed: `false` means the lease was lost
+     * (expired and taken over, or evicted), so the entry was left alone.
+     */
+    fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean
 
     /** Delete [key] only if it still holds [leaseToken], releasing an in-flight lease. */
     fun release(key: String, leaseToken: LeaseToken)

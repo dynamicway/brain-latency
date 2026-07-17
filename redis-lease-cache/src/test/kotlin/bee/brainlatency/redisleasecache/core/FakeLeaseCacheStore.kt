@@ -30,11 +30,13 @@ class FakeLeaseCacheStore : LeaseCacheStore<Any> {
         }
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Unit = synchronized(lock) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: Any?, valueTtl: Duration): Boolean = synchronized(lock) {
         val current = entries[key]
-        if (current is StoredEntry.Leased && current.token.matches(leaseToken)) {
+        val holdsOurLease = current is StoredEntry.Leased && current.token.matches(leaseToken)
+        if (holdsOurLease) {
             entries[key] = StoredEntry.Valued(value, expiresAt(valueTtl))
         }
+        holdsOurLease
     }
 
     override fun release(key: String, leaseToken: LeaseToken): Unit = synchronized(lock) {
