@@ -15,7 +15,7 @@ import kotlin.random.Random
  *
  * This class only orchestrates the states; everything environment-specific lives
  * behind the [LeaseCacheStore] port -- minting a lease token, byte framing (via a
- * [LeaseCacheCodec] and its [LeaseCacheSerializer] strategy), and the storage I/O
+ * [LeaseCacheEntryCodec] and its [LeaseCacheValueSerializer] strategy), and the storage I/O
  * are all the concrete store's concern. This class deals only in domain terms: the
  * granted loader publishes with a compare-and-set on its lease token -- write the
  * value only if the key still holds it -- which both releases the lease and fences the

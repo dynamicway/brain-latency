@@ -1,7 +1,7 @@
 package bee.brainlatency.redisleasecache
 
 import bee.brainlatency.redisleasecache.core.LeaseCache
-import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
+import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntry
 import bee.brainlatency.redisleasecache.core.LeaseToken
 import io.kotest.core.spec.style.StringSpec
@@ -32,7 +32,7 @@ class RedisLeaseCacheConcurrencyTest : StringSpec({
         valueSerializer = RedisSerializer.byteArray()
         afterPropertiesSet()
     }
-    val codec = LeaseCacheCodec(RedisSerializerLeaseCacheSerializer(RedisSerializer.java(), Any::class.java))
+    val codec = LeaseCacheEntryCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java(), Any::class.java))
     val store = RedisTemplateLeaseCacheStore(redisTemplate, codec)
 
     afterTest {

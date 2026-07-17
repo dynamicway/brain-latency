@@ -1,6 +1,6 @@
 package bee.brainlatency.redisleasecache
 
-import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
+import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.CacheManager
 import org.springframework.cache.annotation.EnableCaching
@@ -13,7 +13,7 @@ import java.time.Duration
 
 /**
  * Wires a [RedisLeaseCacheManager] as the Spring [CacheManager] on top of an existing
- * [RedisConnectionFactory] -- the byte-framed [RedisTemplate], [LeaseCacheCodec], and
+ * [RedisConnectionFactory] -- the byte-framed [RedisTemplate], [LeaseCacheEntryCodec], and
  * [RedisTemplateLeaseCacheStore] the manager needs are assembled here, so an application
  * (or a test) only has to supply a connection factory to get `@Cacheable`/`@CacheEvict`
  * working against [TransactionAwareEvictCache].
@@ -43,13 +43,13 @@ class RedisLeaseCacheConfiguration(
     // a caller wanting a statically typed cache builds LeaseCache<V> against its own
     // LeaseCacheStore<V> directly (see RedisLeaseCacheManager's note).
     @Bean
-    fun leaseCacheCodec(): LeaseCacheCodec<Any> =
-        LeaseCacheCodec(RedisSerializerLeaseCacheSerializer(RedisSerializer.java(), Any::class.java))
+    fun leaseCacheCodec(): LeaseCacheEntryCodec<Any> =
+        LeaseCacheEntryCodec(RedisSerializerLeaseCacheValueSerializer(RedisSerializer.java(), Any::class.java))
 
     @Bean
     fun leaseCacheStore(
         leaseCacheRedisTemplate: RedisTemplate<String, ByteArray>,
-        leaseCacheCodec: LeaseCacheCodec<Any>,
+        leaseCacheCodec: LeaseCacheEntryCodec<Any>,
     ): RedisTemplateLeaseCacheStore<Any> = RedisTemplateLeaseCacheStore(leaseCacheRedisTemplate, leaseCacheCodec)
 
     @Bean

@@ -1,12 +1,12 @@
 package bee.brainlatency.redisleasecache
 
-import bee.brainlatency.redisleasecache.core.LeaseCacheSerializer
+import bee.brainlatency.redisleasecache.core.LeaseCacheValueSerializer
 import org.springframework.data.redis.serializer.RedisSerializer
 
 /**
- * Bridges a Spring [RedisSerializer] onto the core's [LeaseCacheSerializer] strategy, so
- * the codec can be backed by any of Spring's serializers (JDK, JSON, ...) without the
- * core depending on them.
+ * Bridges a Spring [RedisSerializer] onto the core's [LeaseCacheValueSerializer]
+ * strategy, so the codec can be backed by any of Spring's serializers (JDK, JSON, ...)
+ * without the core depending on them.
  *
  * The [type] token is what makes this the trusted boundary: because generics are erased,
  * a plain `as V` in [deserialize] would be unchecked and let a wrong-typed payload slip
@@ -14,10 +14,10 @@ import org.springframework.data.redis.serializer.RedisSerializer
  * isn't a [V] fails fast right here. For the untyped Spring path ([type] = `Any`) the
  * cast is a harmless no-op; it only bites when a concrete [V] is used directly.
  */
-class RedisSerializerLeaseCacheSerializer<V : Any>(
+class RedisSerializerLeaseCacheValueSerializer<V : Any>(
     private val delegate: RedisSerializer<Any>,
     private val type: Class<V>,
-) : LeaseCacheSerializer<V> {
+) : LeaseCacheValueSerializer<V> {
 
     override fun serialize(value: V): ByteArray = delegate.serialize(value) ?: ByteArray(0)
 

@@ -1,6 +1,6 @@
 package bee.brainlatency.redisleasecache
 
-import bee.brainlatency.redisleasecache.core.LeaseCacheCodec
+import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntry
 import bee.brainlatency.redisleasecache.core.LeaseCacheStore
 import bee.brainlatency.redisleasecache.core.LeaseToken
@@ -18,7 +18,7 @@ import java.time.Duration
  */
 class RedisTemplateLeaseCacheStore<V : Any>(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
-    private val codec: LeaseCacheCodec<V>,
+    private val codec: LeaseCacheEntryCodec<V>,
 ) : LeaseCacheStore<V> {
 
     override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> {
@@ -36,7 +36,7 @@ class RedisTemplateLeaseCacheStore<V : Any>(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
             leaseToken.framedEntry(),
-            codec.valueEntry(value),
+            codec.encodeValue(value),
             valueTtl.toArgvMillis(),
         )
     }
@@ -50,7 +50,7 @@ class RedisTemplateLeaseCacheStore<V : Any>(
     // A held lease is stored -- and token-fenced -- as its framed entry, so the bytes on
     // the wire carry the tag decode reads to tell a lease from a value, and the CAS in
     // PUBLISH/RELEASE compares like against like.
-    private fun LeaseToken.framedEntry(): ByteArray = codec.leaseEntry(toBytes())
+    private fun LeaseToken.framedEntry(): ByteArray = codec.encodeLease(toBytes())
 
     // Lua PX arguments travel as decimal-string bytes, like every other ARGV.
     private fun Duration.toArgvMillis(): ByteArray = toMillis().toString().toByteArray()
