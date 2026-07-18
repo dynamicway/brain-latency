@@ -8,7 +8,13 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 /** A cache name's lease/value TTL pair -- how [RedisLeaseCacheManager] takes a per-name TTL override. */
-data class LeaseCacheTtl(val leaseTtl: Duration, val valueTtl: Duration)
+data class LeaseCacheTtl(val leaseTtl: Duration, val valueTtl: Duration) {
+    companion object {
+        /** [overrides]'s entry for [name], or [default] when the name has none. */
+        fun resolve(overrides: Map<String, LeaseCacheTtl>, name: String, default: LeaseCacheTtl): LeaseCacheTtl =
+            overrides[name] ?: default
+    }
+}
 
 /**
  * Every name from [getCache] used to share one [LeaseCache] engine at a single fixed
@@ -33,7 +39,7 @@ class RedisLeaseCacheManager(
     // pollInterval); left unset, LeaseCache's own default derives it from *that* name's leaseTtl.
     override fun getCache(name: String): Cache =
         caches.computeIfAbsent(name) {
-            val ttl = cacheTtlOverrides[it] ?: LeaseCacheTtl(leaseTtl, valueTtl)
+            val ttl = LeaseCacheTtl.resolve(cacheTtlOverrides, it, LeaseCacheTtl(leaseTtl, valueTtl))
             val leaseCache = if (waitTimeout != null) {
                 LeaseCache(store, ttl.leaseTtl, ttl.valueTtl, pollInterval, waitTimeout)
             } else {
