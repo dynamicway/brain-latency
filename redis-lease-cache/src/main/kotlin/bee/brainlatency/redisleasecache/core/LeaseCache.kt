@@ -96,7 +96,8 @@ class LeaseCache<V : Any>(
             try {
                 store.release(key, leaseToken)
             } catch (storeEx: LeaseStoreException) {
-                throw storeEx.apply { addSuppressed(loadEx) }
+                storeEx.addSuppressed(loadEx)
+                throw storeEx
             }
             throw OriginLoadException(key, loadEx)
         }

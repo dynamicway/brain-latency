@@ -27,7 +27,7 @@ class RedisTemplateLeaseCacheStore<V : Any>(
     private val codec: LeaseCacheEntryCodec<V>,
 ) : LeaseCacheStore<V> {
 
-    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> = storeFailureIsOurs(key) {
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> = redisAccess(key) {
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
@@ -37,7 +37,7 @@ class RedisTemplateLeaseCacheStore<V : Any>(
         codec.decode(raw)
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean = storeFailureIsOurs(key) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean = redisAccess(key) {
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
@@ -47,17 +47,17 @@ class RedisTemplateLeaseCacheStore<V : Any>(
         ) == 1L
     }
 
-    override fun release(key: String, leaseToken: LeaseToken): Unit = storeFailureIsOurs(key) {
+    override fun release(key: String, leaseToken: LeaseToken): Unit = redisAccess(key) {
         redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), codec.encodeLease(leaseToken))
     }
 
-    override fun evict(key: String): Boolean = storeFailureIsOurs(key) {
+    override fun evict(key: String): Boolean = redisAccess(key) {
         redisTemplate.delete(key)
     }
 
-    // The port's failure contract: whatever breaks inside this adapter is by definition
-    // a store failure, so it leaves as the domain's LeaseStoreException.
-    private inline fun <T> storeFailureIsOurs(key: String, op: () -> T): T =
+    // Every Redis access runs through here so any failure -- connection, script, codec --
+    // leaves as the port's LeaseStoreException instead of a Spring/Lettuce type.
+    private inline fun <T> redisAccess(key: String, op: () -> T): T =
         try {
             op()
         } catch (ex: Exception) {
