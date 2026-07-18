@@ -1,7 +1,7 @@
 package bee.brainlatency.redisleasecache
 
 import bee.brainlatency.redisleasecache.core.LeaseCache
-import bee.brainlatency.redisleasecache.core.LeaseCacheLoadException
+import bee.brainlatency.redisleasecache.core.OriginLoadException
 import org.springframework.cache.Cache
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -52,8 +52,10 @@ class TransactionAwareEvictCache<V : Any>(
     override fun getNativeCache(): Any = delegate
 
     // The `@Cacheable(sync = true)` path: single-flight load, handled by the delegate.
-    // A loader failure comes back as the core's LeaseCacheLoadException and is mapped
-    // onto the exception Spring's contract prescribes for get(key, valueLoader).
+    // A loader failure comes back as the core's OriginLoadException and is mapped onto
+    // the exception Spring's contract prescribes for get(key, valueLoader). The core's
+    // other failures (store outage, wait timeout) are not loader failures, so that
+    // contract does not apply to them and they propagate as themselves.
     //
     // This is the Object boundary: Spring's Cache contract is untyped, so the caller's T
     // and the engine's V are bridged by two unchecked casts here -- the loader's result
@@ -68,7 +70,7 @@ class TransactionAwareEvictCache<V : Any>(
                 @Suppress("UNCHECKED_CAST")
                 valueLoader.call() as V?
             } as T?
-        } catch (ex: LeaseCacheLoadException) {
+        } catch (ex: OriginLoadException) {
             throw Cache.ValueRetrievalException(key, valueLoader, ex.cause)
         }
 

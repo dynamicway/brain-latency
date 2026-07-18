@@ -3,6 +3,7 @@ package bee.brainlatency.redisleasecache
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntry
 import bee.brainlatency.redisleasecache.core.LeaseCacheStore
+import bee.brainlatency.redisleasecache.core.LeaseStoreException
 import bee.brainlatency.redisleasecache.core.LeaseToken
 import org.springframework.data.redis.core.RedisTemplate
 import java.time.Duration
@@ -15,37 +16,53 @@ import java.time.Duration
  * an entry, publish a value, release, evict -- and never touches KEYS/ARGV ordering or
  * byte-encoded durations, which are marshalled only right here, at the Redis I/O
  * boundary. Entry framing it delegates to the [codec], passing [LeaseToken] whole.
+ *
+ * Failures follow the port's contract: anything this adapter's machinery throws --
+ * a connection failure out of the template (after the client's own retries), a codec
+ * that can't decode an entry -- comes out as [LeaseStoreException], so the core never
+ * sees a Spring or Lettuce type.
  */
 class RedisTemplateLeaseCacheStore<V : Any>(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
     private val codec: LeaseCacheEntryCodec<V>,
 ) : LeaseCacheStore<V> {
 
-    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> {
+    override fun getOrAcquire(key: String, leaseToken: LeaseToken, leaseTtl: Duration): LeaseCacheEntry<V> = redisAccess(key) {
         val raw = redisTemplate.execute(
             RedisLeaseCacheScripts.GET_OR_ACQUIRE,
             listOf(key),
             codec.encodeLease(leaseToken),
             leaseTtl.toArgvMillis(),
         ) ?: error("GET_OR_ACQUIRE returned null")
-        return codec.decode(raw)
+        codec.decode(raw)
     }
 
-    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration) {
+    override fun publish(key: String, leaseToken: LeaseToken, value: V?, valueTtl: Duration): Boolean = redisAccess(key) {
         redisTemplate.execute(
             RedisLeaseCacheScripts.PUBLISH,
             listOf(key),
             codec.encodeLease(leaseToken),
             codec.encodeValue(value),
             valueTtl.toArgvMillis(),
-        )
+        ) == 1L
     }
 
-    override fun release(key: String, leaseToken: LeaseToken) {
+    override fun release(key: String, leaseToken: LeaseToken): Unit = redisAccess(key) {
         redisTemplate.execute(RedisLeaseCacheScripts.RELEASE, listOf(key), codec.encodeLease(leaseToken))
     }
 
-    override fun evict(key: String): Boolean = redisTemplate.delete(key)
+    override fun evict(key: String): Boolean = redisAccess(key) {
+        redisTemplate.delete(key)
+    }
+
+    // Every Redis access runs through here so any failure -- connection, script, codec --
+    // leaves as the port's LeaseStoreException instead of a Spring/Lettuce type.
+    private inline fun <T> redisAccess(key: String, op: () -> T): T =
+        try {
+            op()
+        } catch (ex: Exception) {
+            throw LeaseStoreException(key, ex)
+        }
 
     // Lua PX arguments travel as decimal-string bytes, like every other ARGV.
     private fun Duration.toArgvMillis(): ByteArray = toMillis().toString().toByteArray()
