@@ -20,8 +20,8 @@ import kotlin.random.Random
  */
 class LeaseCache<V : Any>(
     private val store: LeaseCacheStore<V>,
-    private val leaseTtl: Duration,
     private val valueTtl: Duration,
+    private val leaseTtl: Duration = Duration.ofMillis(200),
     private val pollInterval: Duration = Duration.ofMillis(50),
     private val waitTimeout: Duration = leaseTtl.multipliedBy(2),
 ) {
