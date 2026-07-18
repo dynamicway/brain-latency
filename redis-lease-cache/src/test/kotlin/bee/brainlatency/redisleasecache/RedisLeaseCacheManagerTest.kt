@@ -18,8 +18,7 @@ class RedisLeaseCacheManagerTest : StringSpec({
         val store = FakeLeaseCacheStore()
         val manager = RedisLeaseCacheManager(
             store,
-            leaseTtl = Duration.ofSeconds(5),
-            valueTtl = Duration.ofSeconds(5),
+            defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)),
             cacheTtlOverrides = mapOf("short-lived" to LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofMillis(200))),
         )
         val overriddenLoads = AtomicInteger(0)
@@ -40,13 +39,13 @@ class RedisLeaseCacheManagerTest : StringSpec({
     }
 
     "getCache is lazy-once per name: repeated calls for the same name return the same Cache instance" {
-        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), leaseTtl = Duration.ofSeconds(5), valueTtl = Duration.ofSeconds(5))
+        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)))
 
         manager.getCache("same") shouldBe manager.getCache("same")
     }
 
     "getCacheNames reflects every name requested through getCache" {
-        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), leaseTtl = Duration.ofSeconds(5), valueTtl = Duration.ofSeconds(5))
+        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)))
 
         manager.getCache("a")
         manager.getCache("b")

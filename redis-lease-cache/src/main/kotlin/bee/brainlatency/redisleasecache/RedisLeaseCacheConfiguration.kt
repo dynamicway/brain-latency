@@ -15,9 +15,9 @@ import java.time.Duration
 
 /**
  * Per-cache-name TTL overrides, e.g. `brainlatency.lease-cache.per-cache.orders.lease-ttl:
- * 2s`. A name absent from [perCache] falls back to [RedisLeaseCacheConfiguration]'s own
- * lease-ttl/value-ttl. Bound separately from those via `@ConfigurationProperties` rather
- * than `@param:Value`, because a `Map` of nested objects needs constructor binding, which
+ * 2s`. A name absent from [perCache] falls back to the manager's default TTL. Bound
+ * separately from lease-ttl/value-ttl via `@ConfigurationProperties` rather than
+ * `@param:Value`, because a `Map` of nested objects needs constructor binding, which
  * `@Value` doesn't support.
  */
 @ConfigurationProperties(prefix = "brainlatency.lease-cache")
@@ -35,8 +35,10 @@ data class LeaseCacheProperties(val perCache: Map<String, LeaseCacheTtl> = empty
 @EnableConfigurationProperties(LeaseCacheProperties::class)
 class RedisLeaseCacheConfiguration(
     private val connectionFactory: RedisConnectionFactory,
-    @param:Value("\${brainlatency.lease-cache.lease-ttl:5s}") private val leaseTtl: Duration,
-    @param:Value("\${brainlatency.lease-cache.value-ttl:30s}") private val valueTtl: Duration,
+    // Unset -> null, so the single hardcoded default lives only in LeaseCacheTtl.DEFAULT
+    // rather than being duplicated as string defaults here.
+    @param:Value("\${brainlatency.lease-cache.lease-ttl:#{null}}") private val leaseTtl: Duration?,
+    @param:Value("\${brainlatency.lease-cache.value-ttl:#{null}}") private val valueTtl: Duration?,
     private val leaseCacheProperties: LeaseCacheProperties,
 ) {
 
@@ -67,6 +69,11 @@ class RedisLeaseCacheConfiguration(
     ): RedisTemplateLeaseCacheStore<Any> = RedisTemplateLeaseCacheStore(leaseCacheRedisTemplate, leaseCacheCodec)
 
     @Bean
-    fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore<Any>): CacheManager =
-        RedisLeaseCacheManager(leaseCacheStore, leaseTtl, valueTtl, cacheTtlOverrides = leaseCacheProperties.perCache)
+    fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore<Any>): CacheManager {
+        val defaultTtl = LeaseCacheTtl(
+            leaseTtl ?: LeaseCacheTtl.DEFAULT.leaseTtl,
+            valueTtl ?: LeaseCacheTtl.DEFAULT.valueTtl,
+        )
+        return RedisLeaseCacheManager(leaseCacheStore, defaultTtl, cacheTtlOverrides = leaseCacheProperties.perCache)
+    }
 }
