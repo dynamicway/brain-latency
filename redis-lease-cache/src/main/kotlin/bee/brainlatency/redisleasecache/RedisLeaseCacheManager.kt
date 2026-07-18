@@ -28,16 +28,18 @@ class RedisLeaseCacheManager(
 
     private val caches = ConcurrentHashMap<String, Cache>()
 
-    // Lazy-once per name, same as before -- just resolving that name's TTL (override or
-    // default) before constructing its LeaseCache, rather than building one shared engine
-    // up front. waitTimeout stays null by default so each name's derives from *its own*
-    // leaseTtl (matching the old leaseTtl.multipliedBy(2) default); pass an explicit
-    // waitTimeout, like pollInterval, to keep a single fixed value across every name.
+    // Lazy-once per name, same as before -- just resolving that name's TTL first. waitTimeout
+    // is passed through only when set explicitly (a fixed value shared by every name, like
+    // pollInterval); left unset, LeaseCache's own default derives it from *that* name's leaseTtl.
     override fun getCache(name: String): Cache =
         caches.computeIfAbsent(name) {
             val ttl = cacheTtlOverrides[it] ?: LeaseCacheTtl(leaseTtl, valueTtl)
-            val effectiveWaitTimeout = waitTimeout ?: ttl.leaseTtl.multipliedBy(2)
-            TransactionAwareEvictCache(it, LeaseCache(store, ttl.leaseTtl, ttl.valueTtl, pollInterval, effectiveWaitTimeout))
+            val leaseCache = if (waitTimeout != null) {
+                LeaseCache(store, ttl.leaseTtl, ttl.valueTtl, pollInterval, waitTimeout)
+            } else {
+                LeaseCache(store, ttl.leaseTtl, ttl.valueTtl, pollInterval)
+            }
+            TransactionAwareEvictCache(it, leaseCache)
         }
 
     override fun getCacheNames(): Collection<String> = caches.keys
