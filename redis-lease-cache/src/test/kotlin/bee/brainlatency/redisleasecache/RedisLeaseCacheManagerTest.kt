@@ -52,4 +52,44 @@ class RedisLeaseCacheManagerTest : StringSpec({
 
         manager.getCacheNames() shouldBe setOf("a", "b")
     }
+
+    "setTtl retunes one name's TTL at runtime, leaving a name left on the default untouched" {
+        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)))
+        manager.setTtl("short-lived", LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofMillis(200)))
+        val shortLoads = AtomicInteger(0)
+        val defaultLoads = AtomicInteger(0)
+
+        manager.getCache("short-lived").get("k", Callable { "loaded-${shortLoads.incrementAndGet()}" })
+        manager.getCache("default-ttl").get("k", Callable { "loaded-${defaultLoads.incrementAndGet()}" })
+
+        Thread.sleep(400)
+
+        // the retuned 200ms valueTtl has lapsed, so this name reloads
+        manager.getCache("short-lived").get("k", Callable { "loaded-${shortLoads.incrementAndGet()}" })
+        // the untouched name is still on the 5s default, so it does not
+        manager.getCache("default-ttl").get("k", Callable { "loaded-${defaultLoads.incrementAndGet()}" })
+
+        shortLoads.get() shouldBe 2
+        defaultLoads.get() shouldBe 1
+    }
+
+    "setTtl on a name already built through getCache takes effect for its next publish" {
+        val manager = RedisLeaseCacheManager(FakeLeaseCacheStore(), defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)))
+        val loads = AtomicInteger(0)
+
+        // first published under the 5s default
+        manager.getCache("orders").get("k", Callable { "loaded-${loads.incrementAndGet()}" })
+
+        // retune, then force a fresh publish so the new 200ms valueTtl is what gets stored
+        manager.setTtl("orders", LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofMillis(200)))
+        manager.getCache("orders").evict("k")
+        manager.getCache("orders").get("k", Callable { "loaded-${loads.incrementAndGet()}" })
+
+        Thread.sleep(400)
+
+        // stored under 200ms now, so it has lapsed and reloads
+        manager.getCache("orders").get("k", Callable { "loaded-${loads.incrementAndGet()}" })
+
+        loads.get() shouldBe 3
+    }
 })
