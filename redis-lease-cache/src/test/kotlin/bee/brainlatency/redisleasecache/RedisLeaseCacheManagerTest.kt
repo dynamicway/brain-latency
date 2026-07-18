@@ -92,4 +92,24 @@ class RedisLeaseCacheManagerTest : StringSpec({
 
         loads.get() shouldBe 3
     }
+
+    "a setTtl on one manager is seen by another sharing the same ttl store" {
+        // two managers over one store stand in for two server instances; the shared
+        // LeaseCacheTtlStore is what a distributed deployment backs with Redis.
+        val store = FakeLeaseCacheStore()
+        val ttlStore = InMemoryLeaseCacheTtlStore()
+        val instanceA = RedisLeaseCacheManager(store, defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)), ttlStore = ttlStore)
+        val instanceB = RedisLeaseCacheManager(store, defaultTtl = LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofSeconds(5)), ttlStore = ttlStore)
+        val loads = AtomicInteger(0)
+
+        // A shortens "orders"; B resolves that name's TTL through the shared store
+        instanceA.setTtl("orders", LeaseCacheTtl(Duration.ofSeconds(5), Duration.ofMillis(200)))
+
+        instanceB.getCache("orders").get("k", Callable { "loaded-${loads.incrementAndGet()}" })
+        Thread.sleep(400)
+        // B published under the propagated 200ms valueTtl, so it has lapsed and reloads
+        instanceB.getCache("orders").get("k", Callable { "loaded-${loads.incrementAndGet()}" })
+
+        loads.get() shouldBe 2
+    }
 })

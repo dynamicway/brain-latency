@@ -19,14 +19,17 @@ data class LeaseCacheTtl(val leaseTtl: Duration, val valueTtl: Duration) {
  * Every name from [getCache] used to share one [LeaseCache] engine at a single fixed
  * TTL. [LeaseCache] is name-agnostic and stateless beyond its config (see its own doc),
  * so nothing stops each name from getting its own instance instead -- which is what lets
- * [cacheTtlOverrides] give individual names their own lease/value TTL while names absent
- * from it keep sharing [defaultTtl].
+ * each name resolve its own lease/value TTL while names left unconfigured share [defaultTtl].
  *
- * Because that per-name instance carries nothing but its config -- the entries themselves
- * live in the [store] under the name-namespaced keys, untouched by the instance backing
- * them -- [setTtl] can retune a name's TTL at runtime by swapping in a fresh [LeaseCache]
- * without dropping a single cached entry: only operations *started after* the swap see the
- * new TTL, and already-stored values keep whatever expiry they were published with.
+ * A name's TTL is resolved on every [getCache] as `[ttlStore] -> [cacheTtlOverrides] ->
+ * [defaultTtl]`: the shared [ttlStore] is the runtime, cross-instance source of truth (what
+ * [setTtl] writes and every server instance reads), [cacheTtlOverrides] is the static
+ * per-name config, and [defaultTtl] the fallback. The built cache is reused while a name's
+ * resolved TTL is unchanged and rebuilt the moment it differs -- so a [setTtl] here, or on
+ * another instance, is picked up without dropping a single cached entry: those live in the
+ * [store] under the name-namespaced keys, untouched by the swapped-out [LeaseCache]. Only
+ * operations started after the swap see the new TTL; already-stored values keep whatever
+ * expiry they were published with.
  */
 class RedisLeaseCacheManager(
     private val store: LeaseCacheStore<Any>,
@@ -34,23 +37,35 @@ class RedisLeaseCacheManager(
     private val pollInterval: Duration = Duration.ofMillis(50),
     private val waitTimeout: Duration? = null,
     private val cacheTtlOverrides: Map<String, LeaseCacheTtl> = emptyMap(),
+    private val ttlStore: LeaseCacheTtlStore = InMemoryLeaseCacheTtlStore(),
 ) : CacheManager {
 
-    private val caches = ConcurrentHashMap<String, Cache>()
+    private class CachedCache(val ttl: LeaseCacheTtl, val cache: Cache)
 
-    // Lazy-once per name, same as before -- just resolving that name's configured TTL first.
-    override fun getCache(name: String): Cache =
-        caches.computeIfAbsent(name) { buildCache(it, cacheTtlOverrides[it] ?: defaultTtl) }
+    private val caches = ConcurrentHashMap<String, CachedCache>()
+
+    // Resolve the name's current TTL first (may consult the shared store), then reuse the
+    // built cache while that TTL holds and rebuild it the moment a retune changes it. The
+    // resolve happens outside compute so no store I/O runs under the map's per-key lock.
+    override fun getCache(name: String): Cache {
+        val ttl = resolveTtl(name)
+        return caches.compute(name) { n, existing ->
+            if (existing != null && existing.ttl == ttl) existing else CachedCache(ttl, buildCache(n, ttl))
+        }!!.cache
+    }
 
     /**
-     * Retune [name]'s lease/value TTL at runtime, replacing its cache with one built at
-     * [ttl]. Takes effect for operations started afterwards; a name never accessed yet is
-     * created here, so it then reports through [getCacheNames]. Its already-cached entries
-     * survive -- they live in the store, not in the swapped-out instance.
+     * Retune [name]'s lease/value TTL at runtime by publishing it to [ttlStore], so this
+     * instance and every other resolves to it (others eventually, within the store's refresh
+     * window). Already-cached entries survive -- they live in the store, not in the
+     * [LeaseCache] the next [getCache] rebuilds.
      */
     fun setTtl(name: String, ttl: LeaseCacheTtl) {
-        caches[name] = buildCache(name, ttl)
+        ttlStore.put(name, ttl)
     }
+
+    private fun resolveTtl(name: String): LeaseCacheTtl =
+        ttlStore.get(name) ?: cacheTtlOverrides[name] ?: defaultTtl
 
     // waitTimeout is passed through only when set explicitly (a fixed value shared by every
     // name, like pollInterval); left unset, LeaseCache's own default derives it from *that*

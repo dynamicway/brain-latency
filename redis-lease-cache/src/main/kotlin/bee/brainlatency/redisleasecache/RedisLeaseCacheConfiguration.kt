@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.serializer.RedisSerializer
 import java.time.Duration
 
@@ -39,6 +40,10 @@ class RedisLeaseCacheConfiguration(
     // rather than being duplicated as string defaults here.
     @param:Value("\${brainlatency.lease-cache.lease-ttl:#{null}}") private val leaseTtl: Duration?,
     @param:Value("\${brainlatency.lease-cache.value-ttl:#{null}}") private val valueTtl: Duration?,
+    // How long a resolved per-name TTL is served from each instance's local cache before it
+    // re-reads the shared store -- the upper bound on how long a runtime retune takes to
+    // propagate to an instance that didn't originate it.
+    @param:Value("\${brainlatency.lease-cache.ttl-refresh-interval:5s}") private val ttlRefreshInterval: Duration,
     private val leaseCacheProperties: LeaseCacheProperties,
 ) {
 
@@ -68,12 +73,26 @@ class RedisLeaseCacheConfiguration(
         leaseCacheCodec: LeaseCacheEntryCodec<Any>,
     ): RedisTemplateLeaseCacheStore<Any> = RedisTemplateLeaseCacheStore(leaseCacheRedisTemplate, leaseCacheCodec)
 
+    // The runtime, cross-instance TTL source of truth: setTtl writes it, every instance
+    // reads it (with short local caching) when resolving a name's TTL.
     @Bean
-    fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore<Any>): CacheManager {
+    fun leaseCacheTtlStore(): LeaseCacheTtlStore =
+        RedisLeaseCacheTtlStore(StringRedisTemplate(connectionFactory), ttlRefreshInterval)
+
+    @Bean
+    fun cacheManager(
+        leaseCacheStore: RedisTemplateLeaseCacheStore<Any>,
+        leaseCacheTtlStore: LeaseCacheTtlStore,
+    ): CacheManager {
         val defaultTtl = LeaseCacheTtl(
             leaseTtl ?: LeaseCacheTtl.DEFAULT.leaseTtl,
             valueTtl ?: LeaseCacheTtl.DEFAULT.valueTtl,
         )
-        return RedisLeaseCacheManager(leaseCacheStore, defaultTtl, cacheTtlOverrides = leaseCacheProperties.perCache)
+        return RedisLeaseCacheManager(
+            leaseCacheStore,
+            defaultTtl,
+            cacheTtlOverrides = leaseCacheProperties.perCache,
+            ttlStore = leaseCacheTtlStore,
+        )
     }
 }
