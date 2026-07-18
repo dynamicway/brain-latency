@@ -8,39 +8,25 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.concurrent.Callable
 
 /**
- * The Spring [Cache] contract for a [LeaseCache]: a thin adapter that maps the
- * `@Cacheable` / `@CacheEvict` surface onto the lease-token protocol and rejects every
- * mode the protocol can't honour. All the stampede coordination -- the load lease,
- * polling, token-fenced publish -- lives in the [delegate]; this class only owns the
- * cache [name] (namespacing every key as `name::key`) and decides which Spring entry
- * points are legal. The name lives here rather than in the engine, so one [delegate] can
- * back every named cache -- as `RedisLeaseCacheManager` does at `LeaseCache<Any>` -- or a
- * factory can hand each name its own typed `LeaseCache<V>`. Either way this adapter is
- * the untyped Spring edge: the engine is driven at its own [V] and the `Object` values of
- * Spring's `Cache` contract are cast across the boundary here.
+ * The Spring [Cache] contract for a [LeaseCache]: a thin adapter that maps
+ * `@Cacheable`/`@CacheEvict` onto the lease-token protocol and rejects every mode the
+ * protocol can't honour. All stampede coordination lives in the [delegate]; this class
+ * only owns the cache [name] (namespacing keys as `name::key`), so one [delegate] can
+ * back every named cache -- as `RedisLeaseCacheManager` does at `LeaseCache<Any>` -- or
+ * a factory can hand each name its own typed `LeaseCache<V>`.
  *
- * This cache is usable only through `@Cacheable(sync = true)` -- [get] with a
- * `valueLoader`, forwarded to the delegate. The `sync = false` read/write path is
- * rejected fail-fast: both the plain value [get] and the tokenless [put] throw, so
- * misapplying the cache surfaces on the first call instead of silently working on hits
- * and breaking on the first miss. Typed [get] and [clear] are unsupported too.
+ * Only `@Cacheable(sync = true)` is supported -- [get] with a `valueLoader`. The
+ * `sync = false` path (plain [get], tokenless [put]) and typed [get]/[clear] are
+ * rejected fail-fast, so misuse breaks on the first call instead of silently working
+ * until the first miss. `@CacheEvict(beforeInvocation = true)`, which routes to
+ * [evictIfPresent], is rejected the same way.
  *
- * Eviction is likewise only supported with `@CacheEvict(beforeInvocation = false)`
- * (the default) -- evict after the method runs. `beforeInvocation = true` routes to
- * [evictIfPresent], which this cache rejects: evicting before invocation would race
- * the very load lease the delegate exists to coordinate.
- *
- * [evict] also defers to the surrounding transaction, when there is one -- the name
- * this class keeps: the entry must outlive the transaction so concurrent readers keep
- * hitting the still-valid value while it's in flight, and eviction must run on every
- * outcome except a certain rollback -- including commit timeout, where the database may
- * have committed. Keying off completion status rather than `afterCommit` covers that
- * unknown-outcome case: the entry is evicted anyway and the next read reloads, rather
- * than potentially serving a value the database no longer holds. Only a certain
- * rollback keeps the entry, since the database is then known unchanged. Unlike Spring's
- * own `TransactionAwareCacheDecorator` (which only ever evicts `afterCommit`), this also
- * evicts on an unknown completion status, for the reason above. Outside a transaction,
- * eviction runs immediately.
+ * [evict] defers to the surrounding transaction when there is one: the entry must
+ * outlive the transaction so concurrent readers keep hitting it while it's in flight,
+ * and it's evicted on every outcome except a confirmed rollback -- including an unknown
+ * completion status, where the database may have committed. That differs from Spring's
+ * own `TransactionAwareCacheDecorator`, which only ever evicts `afterCommit`. Outside a
+ * transaction, eviction runs immediately.
  */
 class TransactionAwareEvictCache<V : Any>(
     private val name: String,

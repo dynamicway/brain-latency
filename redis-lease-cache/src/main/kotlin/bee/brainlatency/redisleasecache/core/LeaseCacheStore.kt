@@ -3,7 +3,7 @@ package bee.brainlatency.redisleasecache.core
 import java.time.Duration
 
 /**
- * The storage port behind [LeaseCache]: implementations own the client, the atomic
+ * The storage interface behind [LeaseCache]: implementations own the client, the atomic
  * script, key/duration marshalling, and the byte framing (e.g. the Spring Data Redis
  * `RedisTemplateLeaseCacheStore`) -- the core only speaks in these domain terms.
  *

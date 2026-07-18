@@ -9,18 +9,15 @@ import org.springframework.data.redis.core.RedisTemplate
 import java.time.Duration
 
 /**
- * The Spring Data Redis implementation of the core's [LeaseCacheStore] port: runs the
- * Lua in [RedisLeaseCacheScripts] through a [RedisTemplate] and owns the [codec], so it
- * marshals both the raw arguments (keys, TTLs as millis bytes) *and* the byte framing
- * (leases, values, the null marker). The core deals only in domain terms -- get-or-acquire
- * an entry, publish a value, release, evict -- and never touches KEYS/ARGV ordering or
- * byte-encoded durations, which are marshalled only right here, at the Redis I/O
- * boundary. Entry framing it delegates to the [codec], passing [LeaseToken] whole.
+ * The Spring Data Redis implementation of [LeaseCacheStore]: runs the Lua in
+ * [RedisLeaseCacheScripts] through a [RedisTemplate] and owns the [codec], marshalling
+ * both the raw arguments (keys, TTLs as millis bytes) and the byte framing (leases,
+ * values, the null marker). The core never touches KEYS/ARGV ordering or byte-encoded
+ * durations -- that happens only here, at the Redis I/O boundary.
  *
- * Failures follow the port's contract: anything this adapter's machinery throws --
- * a connection failure out of the template (after the client's own retries), a codec
- * that can't decode an entry -- comes out as [LeaseStoreException], so the core never
- * sees a Spring or Lettuce type.
+ * Anything this class's machinery throws -- a connection failure out of the template
+ * (after the client's own retries), a codec that can't decode an entry -- comes out as
+ * [LeaseStoreException], so the core never sees a Spring or Lettuce type.
  */
 class RedisTemplateLeaseCacheStore<V : Any>(
     private val redisTemplate: RedisTemplate<String, ByteArray>,
@@ -56,7 +53,7 @@ class RedisTemplateLeaseCacheStore<V : Any>(
     }
 
     // Every Redis access runs through here so any failure -- connection, script, codec --
-    // leaves as the port's LeaseStoreException instead of a Spring/Lettuce type.
+    // leaves as LeaseStoreException instead of a Spring/Lettuce type.
     private inline fun <T> redisAccess(key: String, op: () -> T): T =
         try {
             op()

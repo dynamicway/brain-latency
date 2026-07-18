@@ -10,7 +10,7 @@ import kotlin.random.Random
  * [waitTimeout].
  *
  * This class only orchestrates the states; storage, byte framing, and the lease token
- * itself live behind the [LeaseCacheStore] port. It is name-agnostic and stateless
+ * itself live behind the [LeaseCacheStore] interface. It is name-agnostic and stateless
  * beyond its config, so a single instance backs every named cache -- an adapter (e.g.
  * `TransactionAwareEvictCache`) owns the cache name and hands down namespaced keys.
  *
@@ -76,7 +76,7 @@ class LeaseCache<V : Any>(
      * publish) so a waiter takes over immediately instead of waiting out [leaseTtl].
      * Whether that release lands or loses its own race is immaterial to the caller --
      * either way the loader is what failed, so the origin failure is what surfaces.
-     * Only the store *erroring* changes the story (the port throws its own
+     * Only the store *erroring* changes the story (the store throws its own
      * [LeaseStoreException] for that): then the coordination layer is down, not the
      * origin, and the loader's exception rides along as suppressed.
      */
