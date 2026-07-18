@@ -23,8 +23,8 @@ class OriginLoadException(key: String, override val cause: Throwable) :
 /**
  * The lease store itself failed -- i.e. the client exhausted its own retries and gave up,
  * so this is a genuine outage rather than a lost race. Thrown by the [LeaseCacheStore]
- * adapter itself (the port's failure contract), since the adapter is what knows its
- * client's failures; the core only propagates it. Distinct from [OriginLoadException]:
+ * adapter itself, since the adapter is what knows its client's failures; the core only
+ * propagates it. Distinct from [OriginLoadException]:
  * the origin may be perfectly healthy and the loaded value may even be in hand; what
  * broke is the coordination layer, so the value could not be published or the lease
  * could not be released.
