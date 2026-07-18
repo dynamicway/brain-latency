@@ -2,6 +2,8 @@ package bee.brainlatency.redisleasecache
 
 import bee.brainlatency.redisleasecache.core.LeaseCacheEntryCodec
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.cache.CacheManager
 import org.springframework.cache.annotation.EnableCaching
 import org.springframework.context.annotation.Bean
@@ -12,6 +14,16 @@ import org.springframework.data.redis.serializer.RedisSerializer
 import java.time.Duration
 
 /**
+ * Per-cache-name TTL overrides, e.g. `brainlatency.lease-cache.per-cache.orders.lease-ttl:
+ * 2s`. A name absent from [perCache] falls back to [RedisLeaseCacheConfiguration]'s own
+ * lease-ttl/value-ttl. Bound separately from those via `@ConfigurationProperties` rather
+ * than `@param:Value`, because a `Map` of nested objects needs constructor binding, which
+ * `@Value` doesn't support.
+ */
+@ConfigurationProperties(prefix = "brainlatency.lease-cache")
+data class LeaseCacheProperties(val perCache: Map<String, LeaseCacheTtl> = emptyMap())
+
+/**
  * Wires a [RedisLeaseCacheManager] as the Spring [CacheManager] on top of an existing
  * [RedisConnectionFactory] -- the byte-framed [RedisTemplate], [LeaseCacheEntryCodec], and
  * [RedisTemplateLeaseCacheStore] the manager needs are assembled here, so an application
@@ -20,10 +32,12 @@ import java.time.Duration
  */
 @Configuration
 @EnableCaching
+@EnableConfigurationProperties(LeaseCacheProperties::class)
 class RedisLeaseCacheConfiguration(
     private val connectionFactory: RedisConnectionFactory,
     @param:Value("\${brainlatency.lease-cache.lease-ttl:5s}") private val leaseTtl: Duration,
     @param:Value("\${brainlatency.lease-cache.value-ttl:30s}") private val valueTtl: Duration,
+    private val leaseCacheProperties: LeaseCacheProperties,
 ) {
 
     // Not built with .apply { setConnectionFactory(connectionFactory) ... }: RedisTemplate
@@ -54,5 +68,5 @@ class RedisLeaseCacheConfiguration(
 
     @Bean
     fun cacheManager(leaseCacheStore: RedisTemplateLeaseCacheStore<Any>): CacheManager =
-        RedisLeaseCacheManager(leaseCacheStore, leaseTtl, valueTtl)
+        RedisLeaseCacheManager(leaseCacheStore, leaseTtl, valueTtl, cacheTtlOverrides = leaseCacheProperties.perCache)
 }
